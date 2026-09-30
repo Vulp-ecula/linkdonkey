@@ -727,7 +727,7 @@ function viewImport(){
     return '<div class="row"><h3>'+esc(x.label)+'</h3><p class="meta">'+x.n+' links</p><div class="actions" style="margin-top:.4rem">'+
       '<button class="btn" data-a="imp-sweep" data-g="'+esc(x.key)+'">Sweep these</button>'+binAllBtn(x.key,'Bin all '+x.n)+'</div></div>';
   }).join(''):'<p class="meta">No obvious groups. Go straight to the sweep.</p>');
-  h+='<h2 class="sec">Sweep</h2>';
+  h+='<h2 class="sec" id="sweep-h">Sweep</h2>';
   if(ui.sf){
     var lbl=(gs.filter(function(x){return x.key===ui.sf;})[0]||{}).label||'this group';
     h+='<p class="meta">Showing '+esc(lbl)+'. '+list.length+' left.</p><div class="actions" style="margin:0 0 .8rem"><button class="txt" data-a="imp-clearf">Show everything</button></div>';
@@ -750,7 +750,7 @@ document.addEventListener('click',function(e){
   if(a.indexOf('imp-')!==0)return;
   if(a!=='imp-binall')ui.confirm=null;
   switch(a){
-    case 'imp-sweep':ui.sf=g;ui.kp=null;render();break;
+    case 'imp-sweep':ui.sf=g;ui.kp=null;render();(function(){var h=document.getElementById('sweep-h');if(h&&h.scrollIntoView)h.scrollIntoView({behavior:'smooth',block:'start'});})();break;
     case 'imp-clearf':ui.sf=null;render();break;
     case 'imp-binall':
       if(ui.confirm!==g){ui.confirm=g;render();break;}
