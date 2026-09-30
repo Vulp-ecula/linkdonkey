@@ -69,6 +69,8 @@ h2.sec{font-family:var(--display);font-weight:700;font-size:1.35rem;margin:1.6re
 .card.recall{border-left-color:var(--ink-2);border-left-style:dotted}
 .card h3{font-family:var(--display);font-weight:650;font-size:1.18rem;line-height:1.25;margin:0 0 .3rem;overflow-wrap:anywhere}
 .job{margin:0 0 .25rem}
+.shot{display:block;max-width:100%;max-height:60vh;border-radius:8px;margin:.5rem 0;background:var(--line)}
+.notetext{white-space:pre-wrap;overflow-wrap:anywhere;margin:.4rem 0}
 .meta{margin:0 0 .2rem;font-size:.88rem;color:var(--ink-2);overflow-wrap:anywhere}
 .stale{margin:.6rem 0 0;padding:.4rem .65rem;border-radius:6px;background:var(--rope-soft);font-size:.92rem}
 .ask{margin:.8rem 0 .4rem;font-weight:600}
@@ -262,10 +264,53 @@ function nav(){
 function draft(k){return esc(ui.drafts[k]||'');}
 function errFor(id){return ui.err[id]?'<p class="err" role="alert">'+esc(ui.err[id])+'</p>':'';}
 
+function isText(it){return it.type==='note'||it.type==='shot';}
+function kindLabel(it){return it.type==='note'?'Note':it.type==='shot'?'Screenshot':host(it.url);}
+function firstLine(t){var l=String(t||'').split('\n')[0].trim();return l.length>60?l.slice(0,57)+'...':l;}
+var imgCache={},imgBusy={},BLANK='data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+function itemBody(it){
+  if(it.type==='note')return '<p class="notetext">'+esc(it.text)+'</p>';
+  if(it.type==='shot'&&it.img)return '<img class="shot" data-img="'+esc(it.img)+'" alt="'+esc(it.title)+'" src="'+(imgCache[it.img]||BLANK)+'">';
+  return '';
+}
+function hydrateShots(){
+  if(!sb||ui.auth!=='in')return;
+  document.querySelectorAll('img[data-img]').forEach(function(im){
+    var p=im.getAttribute('data-img');
+    if(imgCache[p]){im.src=imgCache[p];return;}
+    if(imgBusy[p])return;imgBusy[p]=1;
+    sb.storage.from('shots').download(p).then(function(r){
+      imgBusy[p]=0;if(r.error||!r.data)return;
+      imgCache[p]=URL.createObjectURL(r.data);
+      document.querySelectorAll('img[data-img]').forEach(function(x){if(x.getAttribute('data-img')===p)x.src=imgCache[p];});
+    },function(){imgBusy[p]=0;});
+  });
+}
+function shrink(f){
+  return new Promise(function(res,rej){
+    var url=URL.createObjectURL(f),im=new Image();
+    im.onload=function(){
+      var w=im.naturalWidth,h=im.naturalHeight,k=Math.min(1,2000/Math.max(w,h));
+      var c=document.createElement('canvas');c.width=Math.round(w*k);c.height=Math.round(h*k);
+      var g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(im,0,0,c.width,c.height);
+      URL.revokeObjectURL(url);
+      c.toBlob(function(b){b?res(b):rej();},'image/jpeg',0.85);
+    };
+    im.onerror=function(){URL.revokeObjectURL(url);rej();};
+    im.src=url;
+  });
+}
+function setPics(a){ui.pics=a;ui.shotUrl=a.length===1?URL.createObjectURL(a[0]):'';render();}
+function savedMsg(){var n=eligible().length;return n<=SLOTS?'Saved. It is on your back now.':'Saved. '+(n-SLOTS)+' ahead of it in the queue.';}
+document.addEventListener('change',function(e){
+  if(e.target.id!=='f-shot')return;
+  ui.formErr='';
+  setPics(Array.prototype.slice.call(e.target.files||[]));
+});
 function cardOpen(it){
   var rec=it.type==='recipe', p=(ui.panel&&ui.panel.id===it.id)?ui.panel.kind:null, id=esc(it.id);
   var h='<article class="card'+(rec?' recipe':'')+'"><h3>'+esc(it.title)+'</h3><p class="job">'+esc(it.job)+'</p>'+
-    '<p class="meta">'+esc(host(it.url))+', saved '+ago(it.created)+'</p>';
+    itemBody(it)+'<p class="meta">'+esc(kindLabel(it))+', saved '+ago(it.created)+'</p>';
   if(it.keepReason)h+='<p class="meta">Kept because: '+esc(it.keepReason)+'</p>';
   if(isStale(it)&&!it.acting&&!p)h+='<p class="stale">Untouched for over 30 days. Bin it unless you can say why it stays.</p>';
   if(p==='keep'){
@@ -293,7 +338,7 @@ function cardOpen(it){
   }else{
     var stale=isStale(it);
     var binBtn='<button class="btn danger'+(stale?' solid':'')+'" data-a="bin" data-id="'+id+'">Bin</button>';
-    var openBtn='<a class="btn '+(rec?'moss':'primary')+'" href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer" data-a="act" data-id="'+id+'">'+(rec?'Open recipe':'Open it')+'</a>';
+    var openBtn=isText(it)?'<button class="btn primary" data-a="act" data-id="'+id+'">I used it</button>':'<a class="btn '+(rec?'moss':'primary')+'" href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer" data-a="act" data-id="'+id+'">'+(rec?'Open recipe':'Open it')+'</a>';
     var keepBtn='<button class="btn" data-a="keep-open" data-id="'+id+'">Keep</button>';
     h+='<div class="actions">'+(stale?binBtn+openBtn+keepBtn:openBtn+keepBtn+binBtn)+'</div>';
   }
@@ -324,19 +369,25 @@ function viewWeek(){
   return h;
 }
 function viewSave(){
-  var rec=ui.saveType==='recipe';
-  return '<h2 class="sec" style="margin-top:.2rem">Save a link</h2><form id="saveform" novalidate>'+
-    '<label for="f-url">Link</label><input type="url" id="f-url" data-d="url" value="'+draft('url')+'" placeholder="https://" autocomplete="off" autocapitalize="off">'+
-    '<label id="lt">What kind?</label><div class="seg" role="radiogroup" aria-labelledby="lt">'+
-      '<button type="button" role="radio" aria-checked="'+(!rec)+'" data-a="type" data-t="link">Link</button>'+
-      '<button type="button" role="radio" aria-checked="'+rec+'" data-a="type" data-t="recipe">Recipe</button></div>'+
-    '<label for="f-job">What is it for?<span class="hint">'+(rec?'When or why you would cook it. Leave blank for "To cook".':'One line, specific enough to act on.')+'</span></label>'+
+  var t=ui.saveType,rec=t==='recipe',lnk=(t==='link'||rec),np=(ui.pics||[]).length;
+  var kinds=[['link','Link'],['recipe','Recipe'],['note','Note'],['shot','Screenshot']];
+  var hint=t==='note'?'One line: what will you do with it?':t==='shot'?(np>1?'One line for the whole batch. Leave blank to sort them later.':'One line: why keep this screenshot?'):rec?'When or why you would cook it. Leave blank for "To cook".':'One line, specific enough to act on.';
+  var field=lnk
+    ?'<label for="f-url">Link</label><input type="url" id="f-url" data-d="url" value="'+draft('url')+'" placeholder="https://" autocomplete="off" autocapitalize="off">'
+    :t==='note'
+    ?'<label for="f-note">Note</label><textarea id="f-note" rows="5" data-d="note">'+draft('note')+'</textarea>'
+    :'<label for="f-shot">Screenshots<span class="hint">Tick as many as you like.</span></label><input type="file" id="f-shot" accept="image/*" multiple>'+(np>1?'<p class="meta">'+np+' screenshots chosen.</p>':ui.shotUrl?'<img class="shot" src="'+ui.shotUrl+'" alt="Preview of the chosen screenshot">':'');
+  return '<h2 class="sec" style="margin-top:.2rem">Save something</h2><form id="saveform" novalidate>'+
+    '<label id="lt">What kind?</label><div class="seg" role="radiogroup" aria-labelledby="lt" style="flex-wrap:wrap">'+
+    kinds.map(function(k){return '<button type="button" role="radio" aria-checked="'+(t===k[0])+'" data-a="type" data-t="'+k[0]+'" style="flex:1 1 40%">'+k[1]+'</button>';}).join('')+'</div>'+
+    field+
+    '<label for="f-job">What is it for?<span class="hint">'+hint+'</span></label>'+
     '<input type="text" id="f-job" data-d="job" value="'+draft('job')+'">'+
-    '<label for="f-title">Title <span class="hint" style="display:inline">(optional)</span></label>'+
-    '<input type="text" id="f-title" data-d="title" value="'+draft('title')+'">'+
+    (np>1?'':'<label for="f-title">Title <span class="hint" style="display:inline">(optional)</span></label>'+
+    '<input type="text" id="f-title" data-d="title" value="'+draft('title')+'">')+
     (ui.formErr?'<p class="err" role="alert">'+esc(ui.formErr)+'</p>':'')+
-    '<div class="actions"><button class="btn primary" type="submit">Save it</button></div></form>'+
-    (ui.ok?'<p class="ok" role="status">'+esc(ui.ok)+'</p>':'')+saveTool();
+    '<div class="actions"><button class="btn primary" type="submit"'+(ui.saving?' disabled':'')+'>'+(ui.saving?(ui.prog||'Uploading...'):(np>1?'Save '+np+' screenshots':'Save it'))+'</button></div></form>'+
+    (ui.ok?'<p class="ok" role="status">'+esc(ui.ok)+'</p>':'')+(lnk?saveTool():'');
 }
 function viewCookbook(){
   var ks=state.items.filter(function(i){return i.status==='keeper';}).sort(function(a,b){return (b.cookedAt||0)-(a.cookedAt||0);});
@@ -354,11 +405,11 @@ function archiveRows(){
   var rows=state.items.filter(function(i){return i.status==='done'||i.status==='binned';});
   if(ui.filter==='notes')rows=rows.filter(function(i){return i.takeaway;});
   if(ui.filter==='binned')rows=rows.filter(function(i){return i.status==='binned';});
-  if(q)rows=rows.filter(function(i){return [i.title,i.job,i.takeaway,i.tweak,i.url].join(' ').toLowerCase().indexOf(q)>-1;});
+  if(q)rows=rows.filter(function(i){return [i.title,i.job,i.takeaway,i.tweak,i.url,i.text].join(' ').toLowerCase().indexOf(q)>-1;});
   rows.sort(function(a,b){return (b.clearedAt||0)-(a.clearedAt||0);});
   if(!rows.length)return '<p class="empty">'+(state.items.some(function(i){return i.status==='done'||i.status==='binned';})?'Nothing matches.':'Cleared links land here. They are searchable and never come back on their own.')+'</p>';
   return rows.map(function(it){
-    return '<div class="row"><h3><a href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">'+esc(it.title)+'</a></h3>'+
+    return '<div class="row"><h3>'+(isText(it)?esc(it.title):'<a href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">'+esc(it.title)+'</a>')+'</h3>'+itemBody(it)+
       '<p class="meta">'+esc(it.job)+'</p><p class="meta">'+(it.status==='binned'?'Binned ':'Cleared ')+ago(it.clearedAt||it.created)+'</p>'+
       (it.takeaway?'<p class="note">'+esc(it.takeaway)+'</p>':'')+
       (it.status==='binned'?'<div class="actions" style="margin-top:.3rem"><button class="txt" data-a="unbin" data-id="'+esc(it.id)+'">Bring back</button></div>':'')+'</div>';
@@ -374,7 +425,7 @@ function render(){
   if(ui.auth==='out'||ui.auth==='sent'){$('#app').innerHTML=authView();var af=$('[data-autofocus]');if(af)af.focus();return;}
   var v={week:viewWeek,save:viewSave,import:viewImport,cookbook:viewCookbook,archive:viewArchive}[ui.tab]();
   $('#app').innerHTML=header()+nav()+'<main>'+v+'</main>';
-  paintStatus();
+  paintStatus();hydrateShots();
   if(ui.focus){var f=$('[data-autofocus]');if(f)f.focus();ui.focus=false;}
   if(ui.focusId){var f2=document.getElementById(ui.focusId);if(f2)f2.focus();ui.focusId=null;}
 }
@@ -732,12 +783,28 @@ function applyPasted(text){
 function prefillFromUrl(){
   try{
     var q=new URLSearchParams(location.search),h=new URLSearchParams(location.hash.replace(/^#/,''));
-    var u=q.get('u')||h.get('u'),t=q.get('t')||h.get('t');
-    if(!u){var m=(q.get('text')||'').match(/https?:\/\/\S+/);if(m)u=m[0];}
-    if(u&&/^https?:\/\//i.test(u)){
+    var u=q.get('u')||h.get('u'),t=q.get('t')||h.get('t'),tx=(q.get('text')||'').trim();
+    if(!u){var m=tx.match(/https?:\/\/\S+/);if(m)u=m[0];}
+    var ns=parseInt(q.get('shot')||'0',10);
+    if(ns>0){
+      ui.saveType='shot';ui.tab='save';ui.focusId='f-job';
+      ui.ok=(ns>1?ns+' screenshots received. Add one line for the batch, or leave it blank, then save.':'Screenshot received. Say what it is for, then save.');
+      caches.open('linkdonkey-share').then(function(c){
+        var keys=[];for(var i=0;i<ns;i++)keys.push('shared-shot-'+i);
+        return Promise.all(keys.map(function(k){return c.match(k).then(function(r){return r?r.blob():null;});})).then(function(bs){
+          bs=bs.filter(Boolean);
+          return Promise.all(keys.map(function(k){return c.delete(k);})).then(function(){if(bs.length)setPics(bs);});
+        });
+      }).catch(function(){});
+    }else if(u&&/^https?:\/\//i.test(u)){
       ui.drafts.url=u;ui.drafts.title=cleanTitle(t||'');ui.tab='save';ui.focusId='f-job';
       ui.ok='Link filled in. Say what it is for, then save.';
+    }else if(tx||t){
+      ui.saveType='note';ui.drafts.note=tx||t;if(tx&&t)ui.drafts.title=cleanTitle(t);
+      ui.tab='save';ui.focusId='f-job';ui.ok='Note filled in. Say what it is for, then save.';
     }
+    /* drop the query so a reload does not refill; keep the hash, Supabase reads its sign-in tokens from it */
+    if(q.toString()&&history.replaceState)history.replaceState(null,'',location.pathname+location.hash);
   }catch(e){}
 }
 document.addEventListener('paste',function(e){
@@ -798,22 +865,59 @@ document.addEventListener('input',function(e){
   if(k==='q'){ui.q=e.target.value;var l=$('#archive-list');if(l)l.innerHTML=archiveRows();}
   else ui.drafts[k]=e.target.value;
 });
-document.addEventListener('submit',function(e){
+document.addEventListener('submit',async function(e){
   if(e.target.id!=='saveform')return;
   e.preventDefault();
-  var rec=ui.saveType==='recipe',d=ui.drafts;
-  var u=(d.url||'').trim(),job=(d.job||'').trim(),title=(d.title||'').trim();
+  var t=ui.saveType,rec=t==='recipe',d=ui.drafts;
+  var job=(d.job||'').trim(),title=(d.title||'').trim();
   ui.ok='';ui.formErr='';
+  if(t==='note'){
+    var text=(d.note||'').trim();
+    if(!text){ui.formErr='Write the note first.';return render();}
+    if(!job){ui.formErr='Say what it is for. That is what makes it easy to act on later.';return render();}
+    state.items.push({id:uid(),url:'',type:'note',text:text,title:title||firstLine(text),job:job,status:'open',created:now(),touched:now()});
+    ui.drafts.note='';ui.drafts.job='';ui.drafts.title='';
+    ui.ok=savedMsg();
+    return commit();
+  }
+  if(t==='shot'){
+    var pics=ui.pics||[],many=pics.length>1;
+    if(!pics.length){ui.formErr='Choose a screenshot first.';return render();}
+    if(many&&!job)job='Screenshot to sort';
+    if(!job){ui.formErr='Say what it is for. That is what makes it easy to act on later.';return render();}
+    if(!sb||!sbUser){ui.formErr='Sign in first, then try again.';return render();}
+    var day=new Date().toISOString().slice(0,10),done=0,bad=0;
+    ui.saving=true;
+    for(var i=0;i<pics.length;i++){
+      ui.prog='Uploading '+(i+1)+' of '+pics.length;render();
+      var id=uid(),path=sbUser+'/'+id+'.jpg',blob,up;
+      try{blob=await shrink(pics[i]);up=await sb.storage.from('shots').upload(path,blob,{contentType:'image/jpeg'});}catch(err){up={error:err};}
+      if(up.error){bad=pics.length-i;break;}
+      imgCache[path]=URL.createObjectURL(blob);
+      state.items.push({id:id,url:'',type:'shot',img:path,title:(!many&&title)||('Screenshot '+day+(many?' #'+(i+1):'')),job:job,status:'open',created:now(),touched:now()});
+      done++;
+    }
+    ui.saving=false;ui.prog='';
+    ui.pics=pics.slice(done);ui.shotUrl=ui.pics.length===1?URL.createObjectURL(ui.pics[0]):'';
+    if(bad){
+      ui.formErr=(done?'Saved '+done+' of '+pics.length+'. ':'')+'Could not upload the rest. Check your connection, then tap Save again.';
+      if(done)commit();else render();
+      return;
+    }
+    ui.drafts.job='';ui.drafts.title='';
+    ui.ok=many?'Saved '+done+' screenshots.':savedMsg();
+    return commit();
+  }
+  var u=(d.url||'').trim();
   if(!u){ui.formErr='Paste a link first.';return render();}
   if(!/^https?:\/\//i.test(u))u='https://'+u;
   try{new URL(u);}catch(err){ui.formErr='That does not look like a link.';return render();}
   if(!job&&rec)job='To cook';
   if(!job){ui.formErr='Say what it is for. That is what makes it easy to act on later.';return render();}
   if(state.items.some(function(i){return i.status==='open'&&i.url===u;})){ui.formErr='Already saved and still waiting.';return render();}
-  state.items.push({id:uid(),url:u,title:title||niceTitle(u),job:job,type:ui.saveType,status:'open',created:now(),touched:now()});
+  state.items.push({id:uid(),url:u,title:title||niceTitle(u),job:job,type:t,status:'open',created:now(),touched:now()});
   ui.drafts.url='';ui.drafts.job='';ui.drafts.title='';
-  var n=eligible().length;
-  ui.ok=n<=SLOTS?'Saved. It is on your back now.':'Saved. '+(n-SLOTS)+' ahead of it in the queue.';
+  ui.ok=savedMsg();
   commit();
 });
 
