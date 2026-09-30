@@ -154,7 +154,7 @@ async function flush(){
   if(dirty){timer=setTimeout(flush,300);}
   paintStatus();
 }
-var sb=null,uid=null,UID_KEY='linkdonkey.uid';
+var sb=null,sbUser=null,UID_KEY='linkdonkey.uid';
 async function initRemote(){
   if(!/^https:\/\//.test(SB_URL)||!window.supabase){ui.sync='local';paintStatus();return;}
   sb=window.supabase.createClient(SB_URL,SB_KEY);
@@ -166,16 +166,16 @@ function startSync(id){
   /* local cache belongs to one account: drop it if a different account signs in */
   var prev=null;try{prev=localStorage.getItem(UID_KEY);localStorage.setItem(UID_KEY,id);}catch(e){}
   if(prev&&prev!==id){state={v:1,rev:0,items:[]};saveLocal();}
-  uid=id;ui.auth='in';ui.authErr='';
+  sbUser=id;ui.auth='in';ui.authErr='';
   remote={set:async function(doc){
-    var r=await sb.from('ld_state').upsert({user_id:uid,doc:doc,rev:doc.rev||0,updated_at:new Date().toISOString()});
+    var r=await sb.from('ld_state').upsert({user_id:sbUser,doc:doc,rev:doc.rev||0,updated_at:new Date().toISOString()});
     if(r.error)throw r.error;
   }};
   render();pull();
 }
 async function pull(){
   if(!remote)return;
-  var r;try{r=await sb.from('ld_state').select('doc').eq('user_id',uid).maybeSingle();}catch(e){r={error:e};}
+  var r;try{r=await sb.from('ld_state').select('doc').eq('user_id',sbUser).maybeSingle();}catch(e){r={error:e};}
   if(r.error){ui.sync='error';paintStatus();return;}
   var d=r.data&&r.data.doc;
   if(d&&Array.isArray(d.items)){
@@ -757,7 +757,7 @@ document.addEventListener('click',function(e){
     case 'auth-back':ui.auth='out';ui.authErr='';render();break;
     case 'auth-out':
       if(!confirm('Sign out? Your links stay in your account.'))break;
-      sb.auth.signOut().finally(function(){remote=null;uid=null;state={v:1,rev:0,items:[]};saveLocal();try{localStorage.removeItem(UID_KEY);}catch(x){}ui.auth='out';render();});break;
+      sb.auth.signOut().finally(function(){remote=null;sbUser=null;state={v:1,rev:0,items:[]};saveLocal();try{localStorage.removeItem(UID_KEY);}catch(x){}ui.auth='out';render();});break;
     case 'tab':ui.tab=el.dataset.tab;ui.panel=null;ui.ok='';render();break;
     case 'type':ui.saveType=el.dataset.t;render();break;
     case 'filter':ui.filter=el.dataset.f;render();break;
