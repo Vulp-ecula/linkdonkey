@@ -71,6 +71,10 @@ h2.sec{font-family:var(--display);font-weight:700;font-size:1.35rem;margin:1.6re
 .job{margin:0 0 .25rem}
 .shot{display:block;max-width:100%;max-height:60vh;border-radius:8px;margin:.5rem 0;background:var(--line)}
 .notetext{white-space:pre-wrap;overflow-wrap:anywhere;margin:.4rem 0}
+.card.lotd{border-left-color:var(--ink-2)}
+.row .notetext{display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+.row .shot{max-height:14rem}
+.lotd-tag{font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;font-weight:700;margin:0 0 .3rem;color:var(--ink-2)}
 .meta{margin:0 0 .2rem;font-size:.88rem;color:var(--ink-2);overflow-wrap:anywhere}
 .stale{margin:.6rem 0 0;padding:.4rem .65rem;border-radius:6px;background:var(--rope-soft);font-size:.92rem}
 .ask{margin:.8rem 0 .4rem;font-weight:600}
@@ -229,7 +233,7 @@ function isStale(i){return now()-(i.touched||i.created)>STALE_DAYS*DAY;}
 function eligible(){var t=now();return openItems().filter(function(i){return !i.snoozeUntil||i.snoozeUntil<=t;});}
 function carried(){
   return eligible().sort(function(a,b){
-    return (b.acting?1:0)-(a.acting?1:0)||(isStale(b)?1:0)-(isStale(a)?1:0)||a.created-b.created;
+    return (b.acting?1:0)-(a.acting?1:0)||(b.front||0)-(a.front||0)||(isStale(b)?1:0)-(isStale(a)?1:0)||a.created-b.created;
   }).slice(0,SLOTS);
 }
 function recallDue(){
@@ -256,7 +260,7 @@ function header(){
     '<p class="tally">'+cleared+' cleared this month. '+notes+' notes kept.</p></header>';
 }
 function nav(){
-  var tabs=[['week','This week'],['save','Save'],['import','Import'],['cookbook','Cookbook'],['archive','Archive']];
+  var tabs=[['week','This week'],['waiting','Waiting'],['save','Save'],['import','Import'],['cookbook','Cookbook'],['archive','Archive']];
   return '<nav class="tabs" aria-label="Sections">'+tabs.map(function(t){
     return '<button data-a="tab" data-tab="'+t[0]+'"'+(ui.tab===t[0]?' aria-current="page"':'')+'>'+t[1]+'</button>';
   }).join('')+'</nav>';
@@ -301,7 +305,7 @@ function shrink(f){
   });
 }
 function setPics(a){ui.pics=a;ui.shotUrl=a.length===1?URL.createObjectURL(a[0]):'';render();}
-function savedMsg(){var n=eligible().length;return n<=SLOTS?'Saved. It is on your back now.':'Saved. '+(n-SLOTS)+' ahead of it in the queue.';}
+function savedMsg(){var n=eligible().length;return n<=SLOTS?'Saved. It is in This week.':'Saved. It is waiting behind '+(n-SLOTS)+(n-SLOTS===1?' other.':' others.');}
 document.addEventListener('change',function(e){
   if(e.target.id!=='f-shot')return;
   ui.formErr='';
@@ -356,8 +360,58 @@ function cardRecall(it){
   }
   return h+'</article>';
 }
+/* ---------- Link of the Day (remembered per device, never written into the synced data) ---------- */
+var LOTD_KEY='linkdonkey.lotd';
+function dayKey(){var d=new Date();return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();}
+function lastSeen(i){return Math.max(i.touched||0,i.seen||0,i.clearedAt||0,i.cookedAt||0,i.created||0);}
+function lotdGet(){try{var v=JSON.parse(localStorage.getItem(LOTD_KEY)||'null');return v&&typeof v==='object'?v:null;}catch(e){return null;}}
+function lotdSave(v){try{localStorage.setItem(LOTD_KEY,JSON.stringify(v));}catch(e){}}
+function lotdPool(skip){
+  var inWeek={},t=now();
+  carried().forEach(function(i){inWeek[i.id]=1;});
+  return state.items.filter(function(i){
+    if(skip.indexOf(i.id)>-1)return false;
+    if(i.status==='open')return !inWeek[i.id]&&(!i.snoozeUntil||i.snoozeUntil<=t);
+    return i.status==='keeper'||i.status==='done';
+  });
+}
+function lotdPick(skip){
+  var old=function(i){return now()-lastSeen(i)>=3*DAY;};
+  var pool=lotdPool(skip||[]);
+  /* if anything old exists, only old things qualify; a library with nothing old falls back to whatever is there */
+  if(lotdPool([]).some(old))pool=pool.filter(old);
+  if(!pool.length)return null;
+  var w=pool.map(function(i){return Math.max(1,Math.sqrt((now()-lastSeen(i))/DAY));});
+  var r=Math.random()*w.reduce(function(a,b){return a+b;},0);
+  for(var k=0;k<pool.length;k++){r-=w[k];if(r<=0)return pool[k];}
+  return pool[pool.length-1];
+}
+function lotdItem(){
+  var day=dayKey(),L=lotdGet(),same=L&&L.day===day;
+  if(same){
+    if(L.id===null)return null;
+    var cur=L.id?find(L.id):null;
+    if(cur&&cur.status!=='binned')return cur;
+  }
+  var skip=same?(L.skip||[]):[],p=lotdPick(skip);
+  lotdSave({day:day,id:p?p.id:null,skip:skip,seen:false});
+  return p;
+}
+function lotdCard(){
+  var it=lotdItem();if(!it)return '';
+  var L=lotdGet()||{},id=esc(it.id),isLink=!isText(it),rec=it.type==='recipe';
+  var tag=it.status==='done'?'Finished link':it.status==='keeper'?'Cookbook keeper':kindLabel(it);
+  var h='<article class="card lotd"><p class="lotd-tag">Link of the Day</p><h3>'+esc(it.title)+'</h3><p class="job">'+esc(it.job)+'</p>'+itemBody(it)+
+    (it.takeaway?'<p class="note">'+esc(it.takeaway)+'</p>':'')+
+    '<p class="meta">'+esc(tag)+', last visited '+ago(lastSeen(it))+'</p><div class="actions">';
+  if(!L.seen){
+    h+=isLink?'<a class="btn primary" href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer" data-a="lotd-seen" data-id="'+id+'">'+(rec?'Open recipe':'Open it')+'</a>'
+             :'<button class="btn primary" data-a="lotd-seen" data-id="'+id+'">Seen it</button>';
+  }else h+='<span class="meta" style="align-self:center">Visited today.</span>';
+  return h+'<button class="btn" data-a="lotd-other">Show another</button></div></article>';
+}
 function viewWeek(){
-  var h='',rc=recallDue(),cs=carried();
+  var h=lotdCard(),rc=recallDue(),cs=carried();
   if(rc.length){h+='<h2 class="sec">Still remember it?</h2>'+rc.map(cardRecall).join('');}
   if(cs.length){h+=cs.map(cardOpen).join('');}
   else{h+='<p class="empty">'+(openItems().length?'Everything left is kept for later. It comes back when its week is up.':'Nothing to carry. Save a link with a reason and it lands here.')+'</p>'+
@@ -415,6 +469,34 @@ function archiveRows(){
       (it.status==='binned'?'<div class="actions" style="margin-top:.3rem"><button class="txt" data-a="unbin" data-id="'+esc(it.id)+'">Bring back</button></div>':'')+'</div>';
   }).join('');
 }
+function waitingRows(){
+  var q=(ui.wq||'').trim().toLowerCase(),f=ui.wf||'all',inWeek={},t=now();
+  carried().forEach(function(i){inWeek[i.id]=1;});
+  var rows=openItems().filter(function(i){
+    if(f==='links'&&(isText(i)||i.type==='recipe'))return false;
+    if(f==='recipes'&&i.type!=='recipe')return false;
+    if(f==='notes'&&i.type!=='note')return false;
+    if(f==='shots'&&i.type!=='shot')return false;
+    return !q||[i.title,i.job,i.url,i.text].join(' ').toLowerCase().indexOf(q)>-1;
+  }).sort(function(a,b){return b.created-a.created;});
+  if(!rows.length)return '<p class="empty">'+(openItems().length?'Nothing matches.':'Nothing waiting. Save a link, note or screenshot and it lands here.')+'</p>';
+  return rows.map(function(it){
+    var id=esc(it.id);
+    var st=inWeek[it.id]?'In This week':(it.snoozeUntil&&it.snoozeUntil>t?'Kept until '+new Date(it.snoozeUntil).toLocaleDateString():'Waiting its turn');
+    return '<div class="row"><h3>'+(isText(it)?esc(it.title):'<a href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">'+esc(it.title)+'</a>')+'</h3>'+itemBody(it)+
+      '<p class="meta">'+esc(it.job)+'</p><p class="meta">'+esc(kindLabel(it))+', saved '+ago(it.created)+'. '+st+'.</p>'+
+      '<div class="actions" style="margin-top:.3rem">'+(inWeek[it.id]?'':'<button class="txt" data-a="w-front" data-id="'+id+'">Bring to This week</button>')+
+      '<button class="txt" data-a="bin" data-id="'+id+'">Bin</button></div></div>';
+  }).join('');
+}
+function viewWaiting(){
+  var f=ui.wf||'all',n=openItems().length;
+  function chip(k,l){return '<button data-a="wfilter" data-f="'+k+'" aria-pressed="'+(f===k)+'">'+l+'</button>';}
+  return '<h2 class="sec" style="margin-top:.2rem">Waiting</h2><p class="meta">'+n+(n===1?' item':' items')+' saved and not finished yet. Newest first.</p>'+
+    '<label for="f-wq" style="margin-top:0">Search</label><input type="search" id="f-wq" data-d="wq" value="'+esc(ui.wq||'')+'" autocomplete="off">'+
+    '<div class="chips">'+chip('all','All')+chip('links','Links')+chip('recipes','Recipes')+chip('notes','Notes')+chip('shots','Screenshots')+'</div>'+
+    '<div id="waiting-list">'+waitingRows()+'</div>';
+}
 function viewArchive(){
   function chip(f,l){return '<button data-a="filter" data-f="'+f+'" aria-pressed="'+(ui.filter===f)+'">'+l+'</button>';}
   return '<h2 class="sec" style="margin-top:.2rem">Archive</h2>'+
@@ -423,7 +505,7 @@ function viewArchive(){
 }
 function render(){
   if(ui.auth==='out'||ui.auth==='sent'){$('#app').innerHTML=authView();var af=$('[data-autofocus]');if(af)af.focus();return;}
-  var v={week:viewWeek,save:viewSave,import:viewImport,cookbook:viewCookbook,archive:viewArchive}[ui.tab]();
+  var v={week:viewWeek,waiting:viewWaiting,save:viewSave,import:viewImport,cookbook:viewCookbook,archive:viewArchive}[ui.tab]();
   $('#app').innerHTML=header()+nav()+'<main>'+v+'</main>';
   paintStatus();hydrateShots();
   if(ui.focus){var f=$('[data-autofocus]');if(f)f.focus();ui.focus=false;}
@@ -821,13 +903,22 @@ document.addEventListener('click',function(e){
   var a=el.dataset.a,id=el.dataset.id,it=id?find(id):null,d=ui.drafts;
   switch(a){
     case 'auth-check':checkSession().then(function(ok){if(!ok){ui.authErr='Not signed in yet. Tap the link in the email, then come back.';render();}});break;
+    case 'lotd-seen':
+      if(it){var lv=lotdGet();if(lv){lv.seen=true;lotdSave(lv);}it.seen=now();if(it.status==='open')it.touched=now();commit();}
+      break;
+    case 'lotd-other':{
+      var lo=lotdGet();
+      if(lo){lo.skip=(lo.skip||[]).concat(lo.id?[lo.id]:[]);lo.id=undefined;lo.seen=false;lotdSave(lo);}
+      render();break;}
     case 'auth-back':ui.auth='out';ui.authErr='';render();break;
     case 'auth-out':
       if(!confirm('Sign out? Your links stay in your account.'))break;
-      sb.auth.signOut().finally(function(){remote=null;sbUser=null;state={v:1,rev:0,items:[]};saveLocal();try{localStorage.removeItem(UID_KEY);}catch(x){}ui.auth='out';render();});break;
+      sb.auth.signOut().finally(function(){remote=null;sbUser=null;state={v:1,rev:0,items:[]};saveLocal();try{localStorage.removeItem(UID_KEY);localStorage.removeItem(LOTD_KEY);}catch(x){}ui.auth='out';render();});break;
     case 'tab':ui.tab=el.dataset.tab;ui.panel=null;ui.ok='';render();break;
     case 'type':ui.saveType=el.dataset.t;render();break;
     case 'filter':ui.filter=el.dataset.f;render();break;
+    case 'wfilter':ui.wf=el.dataset.f;render();break;
+    case 'w-front':if(it){it.front=now();it.snoozeUntil=null;commit();}break;
     case 'act':if(it){setTimeout(function(){it.acting=true;it.touched=now();commit();},80);}break;
     case 'notyet':if(it){it.acting=false;it.touched=now();commit();}break;
     case 'keep-open':ui.panel={id:id,kind:'keep'};ui.focus=true;render();break;
@@ -837,7 +928,7 @@ document.addEventListener('click',function(e){
     case 'keep-save':
       var why=(d['keep:'+id]||'').trim();
       if(!why){ui.err[id]='Give a reason, or bin it.';ui.focus=true;render();break;}
-      it.keepReason=why;it.snoozeUntil=now()+KEEP_DAYS*DAY;it.touched=now();it.acting=false;
+      it.keepReason=why;it.snoozeUntil=now()+KEEP_DAYS*DAY;it.touched=now();it.acting=false;it.front=0;
       delete d['keep:'+id];delete ui.err[id];ui.panel=null;commit();break;
     case 'done-save':
       var note=(d['done:'+id]||'').trim();
@@ -863,6 +954,7 @@ document.addEventListener('click',function(e){
 document.addEventListener('input',function(e){
   var k=e.target.dataset&&e.target.dataset.d;if(!k)return;
   if(k==='q'){ui.q=e.target.value;var l=$('#archive-list');if(l)l.innerHTML=archiveRows();}
+  else if(k==='wq'){ui.wq=e.target.value;var wl=$('#waiting-list');if(wl){wl.innerHTML=waitingRows();hydrateShots();}}
   else ui.drafts[k]=e.target.value;
 });
 document.addEventListener('submit',async function(e){
