@@ -140,12 +140,8 @@ function monthStart(){var d=new Date();return new Date(d.getFullYear(),d.getMont
 /* ---------- storage ---------- */
 function loadLocal(){try{var r=localStorage.getItem(LS_KEY);if(r){var s=JSON.parse(r);if(s&&Array.isArray(s.items))state=s;}}catch(e){}}
 function saveLocal(){try{localStorage.setItem(LS_KEY,JSON.stringify(state));}catch(e){}}
-function prune(){
-  var size=JSON.stringify(state).length;
-  if(size<200000)return;
-  var binned=state.items.filter(function(i){return i.status==='binned';}).sort(function(a,b){return (a.clearedAt||0)-(b.clearedAt||0);});
-  while(size>=180000&&binned.length){var x=binned.shift();state.items=state.items.filter(function(i){return i!==x;});size=JSON.stringify(state).length;}
-}
+/* Nothing is ever deleted automatically. The synced data has a 2 MB cap, so warn well before it is reached. */
+function checkSize(){var n=JSON.stringify(state).length;ui.big=n>1500000?Math.round(n/1e5)/10:0;}
 var remote=null,timer=null,inflight=false,dirty=false;
 function pushRemote(){
   if(!remote)return;
@@ -186,7 +182,7 @@ async function pull(){
   var d=r.data&&r.data.doc;
   if(d&&Array.isArray(d.items)){
     var rr=d.rev||0;
-    if(rr>state.rev){state=clone(d);saveLocal();render();}
+    if(rr>state.rev){state=clone(d);saveLocal();checkSize();render();}
     else if(rr<state.rev){pushRemote();return;}
   }else if(state.items.length){pushRemote();return;}
   ui.sync='synced';paintStatus();
@@ -225,7 +221,7 @@ document.addEventListener('submit',async function(e){
   if(r.error)ui.authErr='Could not send the link. '+(r.error.message||'');else ui.auth='sent';
   render();
 });
-function commit(){state.rev=now();prune();saveLocal();pushRemote();render();}
+function commit(){state.rev=now();checkSize();saveLocal();pushRemote();render();}
 
 /* ---------- derived ---------- */
 function openItems(){return state.items.filter(function(i){return i.status==='open';});}
@@ -257,10 +253,10 @@ function header(){
   var s='';for(var k=0;k<SLOTS;k++)s+=sack(k<c);
   return '<header><div class="top"><div class="lockup"><img class="mark" src="data:image/webp;base64,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" width="44" height="44" alt=""><h1 class="brand">LinkDonkey</h1></div><p class="sync" id="sync" aria-live="polite"></p>'+(sb&&ui.auth==='in'?'<button class="txt" data-a="auth-out">Sign out</button>':'')+'</div>'+
     '<div class="gauge"><div class="sacks" role="img" aria-label="'+esc(head)+'">'+s+'</div><h2>'+esc(head)+'</h2></div>'+
-    '<p class="tally">'+cleared+' cleared this month. '+notes+' notes kept.</p></header>';
+    '<p class="tally">'+cleared+' cleared this month. '+notes+' notes kept.</p></header>'+(ui.big?'<p class="err" role="alert">Your library is nearly full ('+ui.big+' of 2 MB). Nothing has been deleted. Tell Claude soon so it can raise the limit before syncing stops.</p>':'');
 }
 function nav(){
-  var tabs=[['week','This week'],['waiting','Waiting'],['save','Save'],['import','Import'],['cookbook','Cookbook'],['archive','Archive']];
+  var tabs=[['week','This week'],['waiting','Waiting'],['forever','Forever'],['save','Save'],['import','Import'],['cookbook','Cookbook'],['archive','Archive']];
   return '<nav class="tabs" aria-label="Sections">'+tabs.map(function(t){
     return '<button data-a="tab" data-tab="'+t[0]+'"'+(ui.tab===t[0]?' aria-current="page"':'')+'>'+t[1]+'</button>';
   }).join('')+'</nav>';
@@ -305,7 +301,7 @@ function shrink(f){
   });
 }
 function setPics(a){ui.pics=a;ui.shotUrl=a.length===1?URL.createObjectURL(a[0]):'';render();}
-function savedMsg(){var n=eligible().length;return n<=SLOTS?'Saved. It is in This week.':'Saved. It is waiting behind '+(n-SLOTS)+(n-SLOTS===1?' other.':' others.');}
+function savedMsg(st){if(st==='forever')return 'Saved to Keep forever.';var n=eligible().length;return n<=SLOTS?'Saved. It is in This week.':'Saved. It is waiting behind '+(n-SLOTS)+(n-SLOTS===1?' other.':' others.');}
 document.addEventListener('change',function(e){
   if(e.target.id!=='f-shot')return;
   ui.formErr='';
@@ -344,7 +340,8 @@ function cardOpen(it){
     var binBtn='<button class="btn danger'+(stale?' solid':'')+'" data-a="bin" data-id="'+id+'">Bin</button>';
     var openBtn=isText(it)?'<button class="btn primary" data-a="act" data-id="'+id+'">I used it</button>':'<a class="btn '+(rec?'moss':'primary')+'" href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer" data-a="act" data-id="'+id+'">'+(rec?'Open recipe':'Open it')+'</a>';
     var keepBtn='<button class="btn" data-a="keep-open" data-id="'+id+'">Keep</button>';
-    h+='<div class="actions">'+(stale?binBtn+openBtn+keepBtn:openBtn+keepBtn+binBtn)+'</div>';
+    var foreverBtn='<button class="txt" data-a="forever" data-id="'+id+'">Keep forever</button>';
+    h+='<div class="actions">'+(stale?binBtn+openBtn+keepBtn:openBtn+keepBtn+binBtn)+foreverBtn+'</div>';
   }
   return h+'</article>';
 }
@@ -372,7 +369,7 @@ function lotdPool(skip){
   return state.items.filter(function(i){
     if(skip.indexOf(i.id)>-1)return false;
     if(i.status==='open')return !inWeek[i.id]&&(!i.snoozeUntil||i.snoozeUntil<=t);
-    return i.status==='keeper'||i.status==='done';
+    return i.status==='keeper'||i.status==='done'||i.status==='forever';
   });
 }
 function lotdPick(skip){
@@ -400,7 +397,7 @@ function lotdItem(){
 function lotdCard(){
   var it=lotdItem();if(!it)return '';
   var L=lotdGet()||{},id=esc(it.id),isLink=!isText(it),rec=it.type==='recipe';
-  var tag=it.status==='done'?'Finished link':it.status==='keeper'?'Cookbook keeper':kindLabel(it);
+  var tag=it.status==='forever'?'Keep forever':it.status==='done'?'Finished link':it.status==='keeper'?'Cookbook keeper':kindLabel(it);
   var h='<article class="card lotd"><p class="lotd-tag">Link of the Day</p><h3>'+esc(it.title)+'</h3><p class="job">'+esc(it.job)+'</p>'+itemBody(it)+
     (it.takeaway?'<p class="note">'+esc(it.takeaway)+'</p>':'')+
     '<p class="meta">'+esc(tag)+', last visited '+ago(lastSeen(it))+'</p><div class="actions">';
@@ -439,6 +436,7 @@ function viewSave(){
     '<input type="text" id="f-job" data-d="job" value="'+draft('job')+'">'+
     (np>1?'':'<label for="f-title">Title <span class="hint" style="display:inline">(optional)</span></label>'+
     '<input type="text" id="f-title" data-d="title" value="'+draft('title')+'">')+
+    '<div class="chips" style="margin:.6rem 0 .2rem"><button type="button" data-a="ftoggle" aria-pressed="'+(!!ui.saveForever)+'">Keep forever</button></div><p class="meta">'+(ui.saveForever?'Goes straight to your Keep forever shelf, not the weekly queue.':'Optional. Skips the weekly queue and is never binned.')+'</p>'+
     (ui.formErr?'<p class="err" role="alert">'+esc(ui.formErr)+'</p>':'')+
     '<div class="actions"><button class="btn primary" type="submit"'+(ui.saving?' disabled':'')+'>'+(ui.saving?(ui.prog||'Uploading...'):(np>1?'Save '+np+' screenshots':'Save it'))+'</button></div></form>'+
     (ui.ok?'<p class="ok" role="status">'+esc(ui.ok)+'</p>':'')+(lnk?saveTool():'');
@@ -485,7 +483,7 @@ function waitingRows(){
     var st=inWeek[it.id]?'In This week':(it.snoozeUntil&&it.snoozeUntil>t?'Kept until '+new Date(it.snoozeUntil).toLocaleDateString():'Waiting its turn');
     return '<div class="row"><h3>'+(isText(it)?esc(it.title):'<a href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">'+esc(it.title)+'</a>')+'</h3>'+itemBody(it)+
       '<p class="meta">'+esc(it.job)+'</p><p class="meta">'+esc(kindLabel(it))+', saved '+ago(it.created)+'. '+st+'.</p>'+
-      '<div class="actions" style="margin-top:.3rem">'+(inWeek[it.id]?'':'<button class="txt" data-a="w-front" data-id="'+id+'">Bring to This week</button>')+
+      '<div class="actions" style="margin-top:.3rem">'+(inWeek[it.id]?'':'<button class="txt" data-a="w-front" data-id="'+id+'">Bring to This week</button>')+'<button class="txt" data-a="forever" data-id="'+id+'">Keep forever</button>'+
       '<button class="txt" data-a="bin" data-id="'+id+'">Bin</button></div></div>';
   }).join('');
 }
@@ -497,6 +495,32 @@ function viewWaiting(){
     '<div class="chips">'+chip('all','All')+chip('links','Links')+chip('recipes','Recipes')+chip('notes','Notes')+chip('shots','Screenshots')+'</div>'+
     '<div id="waiting-list">'+waitingRows()+'</div>';
 }
+function foreverRows(){
+  var q=(ui.fq||'').trim().toLowerCase(),f=ui.ff||'all';
+  var rows=state.items.filter(function(i){
+    if(i.status!=='forever')return false;
+    if(f==='links'&&(isText(i)||i.type==='recipe'))return false;
+    if(f==='recipes'&&i.type!=='recipe')return false;
+    if(f==='notes'&&i.type!=='note')return false;
+    if(f==='shots'&&i.type!=='shot')return false;
+    return !q||[i.title,i.job,i.url,i.text,i.takeaway].join(' ').toLowerCase().indexOf(q)>-1;
+  }).sort(function(a,b){return (b.foreverAt||0)-(a.foreverAt||0);});
+  if(!rows.length)return '<p class="empty">'+(state.items.some(function(i){return i.status==='forever';})?'Nothing matches.':'Nothing here yet. Tap Keep forever on a card, in Waiting, or when you save.')+'</p>';
+  return rows.map(function(it){
+    var id=esc(it.id);
+    return '<div class="row"><h3>'+(isText(it)?esc(it.title):'<a href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">'+esc(it.title)+'</a>')+'</h3>'+itemBody(it)+
+      '<p class="meta">'+esc(it.job)+'</p><p class="meta">'+esc(kindLabel(it))+', on the shelf since '+ago(it.foreverAt||it.created)+'.</p>'+
+      '<div class="actions" style="margin-top:.3rem"><button class="txt" data-a="unforever" data-id="'+id+'">Take off the shelf</button></div></div>';
+  }).join('');
+}
+function viewForever(){
+  var f=ui.ff||'all',n=state.items.filter(function(i){return i.status==='forever';}).length;
+  function chip(k,l){return '<button data-a="ffilter" data-f="'+k+'" aria-pressed="'+(f===k)+'">'+l+'</button>';}
+  return '<h2 class="sec" style="margin-top:.2rem">Keep forever</h2><p class="meta">'+n+(n===1?' item':' items')+'. The app never bins or deletes these, and they stay out of the weekly queue.</p>'+
+    '<label for="f-fq" style="margin-top:0">Search</label><input type="search" id="f-fq" data-d="fq" value="'+esc(ui.fq||'')+'" autocomplete="off">'+
+    '<div class="chips">'+chip('all','All')+chip('links','Links')+chip('recipes','Recipes')+chip('notes','Notes')+chip('shots','Screenshots')+'</div>'+
+    '<div id="forever-list">'+foreverRows()+'</div>';
+}
 function viewArchive(){
   function chip(f,l){return '<button data-a="filter" data-f="'+f+'" aria-pressed="'+(ui.filter===f)+'">'+l+'</button>';}
   return '<h2 class="sec" style="margin-top:.2rem">Archive</h2>'+
@@ -505,7 +529,7 @@ function viewArchive(){
 }
 function render(){
   if(ui.auth==='out'||ui.auth==='sent'){$('#app').innerHTML=authView();var af=$('[data-autofocus]');if(af)af.focus();return;}
-  var v={week:viewWeek,waiting:viewWaiting,save:viewSave,import:viewImport,cookbook:viewCookbook,archive:viewArchive}[ui.tab]();
+  var v={week:viewWeek,waiting:viewWaiting,forever:viewForever,save:viewSave,import:viewImport,cookbook:viewCookbook,archive:viewArchive}[ui.tab]();
   $('#app').innerHTML=header()+nav()+'<main>'+v+'</main>';
   paintStatus();hydrateShots();
   if(ui.focus){var f=$('[data-autofocus]');if(f)f.focus();ui.focus=false;}
@@ -647,7 +671,7 @@ function sweepCard(it){
 }
 /* ---------- export to Chrome ---------- */
 var dl=null;
-function exportable(){return state.items.filter(function(i){return (i.status==='open'||i.status==='keeper')&&/^https?:\/\//i.test(i.url||'');});}
+function exportable(){return state.items.filter(function(i){return (i.status==='open'||i.status==='keeper'||i.status==='forever')&&/^https?:\/\//i.test(i.url||'');});}
 function bookmarksHtml(){
   var xs=exportable();
   function folder(name,rows){
@@ -660,6 +684,7 @@ function bookmarksHtml(){
     folder('Links',xs.filter(function(i){return i.status==='open'&&i.type!=='recipe';}))+
     folder('Recipes to cook',xs.filter(function(i){return i.status==='open'&&i.type==='recipe';}))+
     folder('Cookbook',xs.filter(function(i){return i.status==='keeper';}))+
+    folder('Keep forever',xs.filter(function(i){return i.status==='forever';}))+
     '</DL><p>\n</DL><p>\n';
 }
 function exportBlock(){
@@ -918,6 +943,10 @@ document.addEventListener('click',function(e){
     case 'type':ui.saveType=el.dataset.t;render();break;
     case 'filter':ui.filter=el.dataset.f;render();break;
     case 'wfilter':ui.wf=el.dataset.f;render();break;
+    case 'ffilter':ui.ff=el.dataset.f;render();break;
+    case 'ftoggle':ui.saveForever=!ui.saveForever;render();break;
+    case 'forever':if(it){it.status='forever';it.foreverAt=now();it.touched=now();it.acting=false;it.snoozeUntil=null;it.front=0;ui.panel=null;commit();}break;
+    case 'unforever':if(it){it.status='open';it.foreverAt=null;it.touched=now();it.created=now();commit();}break;
     case 'w-front':if(it){it.front=now();it.snoozeUntil=null;commit();}break;
     case 'act':if(it){setTimeout(function(){it.acting=true;it.touched=now();commit();},80);}break;
     case 'notyet':if(it){it.acting=false;it.touched=now();commit();}break;
@@ -954,22 +983,23 @@ document.addEventListener('click',function(e){
 document.addEventListener('input',function(e){
   var k=e.target.dataset&&e.target.dataset.d;if(!k)return;
   if(k==='q'){ui.q=e.target.value;var l=$('#archive-list');if(l)l.innerHTML=archiveRows();}
+  else if(k==='fq'){ui.fq=e.target.value;var fl=$('#forever-list');if(fl){fl.innerHTML=foreverRows();hydrateShots();}}
   else if(k==='wq'){ui.wq=e.target.value;var wl=$('#waiting-list');if(wl){wl.innerHTML=waitingRows();hydrateShots();}}
   else ui.drafts[k]=e.target.value;
 });
 document.addEventListener('submit',async function(e){
   if(e.target.id!=='saveform')return;
   e.preventDefault();
-  var t=ui.saveType,rec=t==='recipe',d=ui.drafts;
+  var t=ui.saveType,rec=t==='recipe',d=ui.drafts,st=ui.saveForever?'forever':'open',fa=st==='forever'?now():0;
   var job=(d.job||'').trim(),title=(d.title||'').trim();
   ui.ok='';ui.formErr='';
   if(t==='note'){
     var text=(d.note||'').trim();
     if(!text){ui.formErr='Write the note first.';return render();}
     if(!job){ui.formErr='Say what it is for. That is what makes it easy to act on later.';return render();}
-    state.items.push({id:uid(),url:'',type:'note',text:text,title:title||firstLine(text),job:job,status:'open',created:now(),touched:now()});
+    state.items.push({id:uid(),url:'',type:'note',text:text,title:title||firstLine(text),job:job,status:st,foreverAt:fa,created:now(),touched:now()});
     ui.drafts.note='';ui.drafts.job='';ui.drafts.title='';
-    ui.ok=savedMsg();
+    ui.ok=savedMsg(st);ui.saveForever=false;
     return commit();
   }
   if(t==='shot'){
@@ -986,7 +1016,7 @@ document.addEventListener('submit',async function(e){
       try{blob=await shrink(pics[i]);up=await sb.storage.from('shots').upload(path,blob,{contentType:'image/jpeg'});}catch(err){up={error:err};}
       if(up.error){bad=pics.length-i;break;}
       imgCache[path]=URL.createObjectURL(blob);
-      state.items.push({id:id,url:'',type:'shot',img:path,title:(!many&&title)||('Screenshot '+day+(many?' #'+(i+1):'')),job:job,status:'open',created:now(),touched:now()});
+      state.items.push({id:id,url:'',type:'shot',img:path,title:(!many&&title)||('Screenshot '+day+(many?' #'+(i+1):'')),job:job,status:st,foreverAt:fa,created:now(),touched:now()});
       done++;
     }
     ui.saving=false;ui.prog='';
@@ -997,7 +1027,7 @@ document.addEventListener('submit',async function(e){
       return;
     }
     ui.drafts.job='';ui.drafts.title='';
-    ui.ok=many?'Saved '+done+' screenshots.':savedMsg();
+    ui.ok=many?'Saved '+done+' screenshots'+(st==='forever'?' to Keep forever.':'.'):savedMsg(st);ui.saveForever=false;
     return commit();
   }
   var u=(d.url||'').trim();
@@ -1007,13 +1037,14 @@ document.addEventListener('submit',async function(e){
   if(!job&&rec)job='To cook';
   if(!job){ui.formErr='Say what it is for. That is what makes it easy to act on later.';return render();}
   if(state.items.some(function(i){return i.status==='open'&&i.url===u;})){ui.formErr='Already saved and still waiting.';return render();}
-  state.items.push({id:uid(),url:u,title:title||niceTitle(u),job:job,type:t,status:'open',created:now(),touched:now()});
+  state.items.push({id:uid(),url:u,title:title||niceTitle(u),job:job,type:t,status:st,foreverAt:fa,created:now(),touched:now()});
   ui.drafts.url='';ui.drafts.job='';ui.drafts.title='';
-  ui.ok=savedMsg();
+  ui.ok=savedMsg(st);ui.saveForever=false;
   commit();
 });
 
 loadLocal();
+checkSize();
 loadStage();
 prefillFromUrl();
 render();
