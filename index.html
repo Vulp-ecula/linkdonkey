@@ -70,6 +70,16 @@ h2.sec{font-family:var(--display);font-weight:700;font-size:1.35rem;margin:1.6re
 .card h3{font-family:var(--display);font-weight:650;font-size:1.18rem;line-height:1.25;margin:0 0 .3rem;overflow-wrap:anywhere}
 .job{margin:0 0 .25rem}
 .shot{display:block;max-width:100%;max-height:60vh;border-radius:8px;margin:.5rem 0;background:var(--line)}
+.summ{margin:.35rem 0;font-style:italic}
+.cs{min-height:36px;padding:.2rem .75rem;border-radius:999px;border:1.5px solid var(--line);background:transparent;font:inherit;font-weight:600;margin:.15rem .35rem .15rem 0;cursor:pointer;color:inherit}
+.cs.on{border-color:var(--ink);background:var(--card)}
+select{font:inherit;padding:.5rem .6rem;border:1.5px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);max-width:100%}
+.qopt{display:block;width:100%;text-align:left;margin:.4rem 0;padding:.7rem .9rem;border:2px solid var(--line);border-radius:10px;background:transparent;font:inherit;color:inherit;cursor:pointer;min-height:44px}
+.qopt.good{border-color:#2e7d4f;background:rgba(46,125,79,.18)}
+.qopt.bad{border-color:#c0452f;background:rgba(192,69,47,.16)}
+.qopt[aria-disabled="true"]{cursor:default}
+.orig{margin:1rem 0;padding:.8rem 1rem;border:1.5px dashed var(--line);border-radius:10px}
+.orig .notetext{display:block;overflow:visible}
 .notetext{white-space:pre-wrap;overflow-wrap:anywhere;margin:.4rem 0}
 .card.lotd{border-left-color:var(--ink-2)}
 .row .notetext{display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
@@ -121,7 +131,7 @@ details[open] summary.sum{margin-bottom:.2rem}
 (function(){
 'use strict';
 var DAY=864e5, STALE_DAYS=30, SLOTS=3, KEEP_DAYS=7, STEPS=[3,10,30,90];
-var BUILD='2026-10-01 e';
+var BUILD='2026-10-01 i';
 var LS_KEY='linkdonkey.v1';
 /* Supabase project values. The anon/publishable key is public by design; row-level security protects the data. */
 var SB_URL='https://vkreqwhpnxcduqoiifmx.supabase.co', SB_KEY='sb_publishable_q6CciDmqm967BHjGLu9aSA_2XBApgGd';
@@ -279,7 +289,7 @@ function header(){
     '<p class="tally">'+cleared+' cleared this month. '+notes+' notes kept.</p></header>'+(ui.big?'<p class="err" role="alert">Your library is nearly full ('+ui.big+' of 2 MB). Nothing has been deleted. Tell Claude soon so it can raise the limit before syncing stops.</p>':'');
 }
 function nav(){
-  var tabs=[['week','This week'],['waiting','Waiting'],['forever','Forever'],['save','Save'],['import','Import'],['cookbook','Cookbook'],['archive','Archive']];
+  var tabs=[['week','This week'],['waiting','Waiting'],['forever','Forever'],['save','Save'],['import','Import'],['cookbook','Cookbook'],['archive','Archive'],['quiz','Quiz']];
   return '<nav class="tabs" aria-label="Sections">'+tabs.map(function(t){
     return '<button data-a="tab" data-tab="'+t[0]+'"'+(ui.tab===t[0]?' aria-current="page"':'')+'>'+t[1]+'</button>';
   }).join('')+'</nav>';
@@ -296,16 +306,17 @@ function itemBody(it){
   if(it.type==='shot'&&it.img)return '<img class="shot" data-img="'+esc(it.img)+'" alt="'+esc(it.title)+'" src="'+(imgCache[it.img]||BLANK)+'">';
   return '';
 }
+function linkShot(p){document.querySelectorAll('a[data-imglink]').forEach(function(a){if(a.getAttribute('data-imglink')===p&&imgCache[p])a.href=imgCache[p];});}
 function hydrateShots(){
   if(!sb||ui.auth!=='in')return;
   document.querySelectorAll('img[data-img]').forEach(function(im){
     var p=im.getAttribute('data-img');
-    if(imgCache[p]){im.src=imgCache[p];return;}
+    if(imgCache[p]){im.src=imgCache[p];linkShot(p);return;}
     if(imgBusy[p])return;imgBusy[p]=1;
     sb.storage.from('shots').download(p).then(function(r){
       imgBusy[p]=0;if(r.error||!r.data)return;
       imgCache[p]=URL.createObjectURL(r.data);
-      document.querySelectorAll('img[data-img]').forEach(function(x){if(x.getAttribute('data-img')===p)x.src=imgCache[p];});
+      document.querySelectorAll('img[data-img]').forEach(function(x){if(x.getAttribute('data-img')===p)x.src=imgCache[p];});linkShot(p);
     },function(){imgBusy[p]=0;});
   });
 }
@@ -337,7 +348,7 @@ document.addEventListener('change',function(e){
 function cardOpen(it){
   var rec=it.type==='recipe', p=(ui.panel&&ui.panel.id===it.id)?ui.panel.kind:null, id=esc(it.id);
   var h='<article class="card'+(rec?' recipe':'')+'"><h3>'+esc(it.title)+'</h3><p class="job">'+esc(it.job)+'</p>'+
-    itemBody(it)+'<p class="meta">'+esc(kindLabel(it))+', saved '+ago(it.created)+'</p>';
+    itemBody(it)+catBlock(it)+'<p class="meta">'+esc(kindLabel(it))+', saved '+ago(it.created)+'</p>';
   if(it.keepReason)h+='<p class="meta">Kept because: '+esc(it.keepReason)+'</p>';
   if(isStale(it)&&!it.acting&&!p)h+='<p class="stale">Untouched for over 30 days. Bin it unless you can say why it stays.</p>';
   if(p==='keep'){
@@ -368,7 +379,7 @@ function cardOpen(it){
     var openBtn=isText(it)?'<button class="btn primary" data-a="act" data-id="'+id+'">I used it</button>':'<a class="btn '+(rec?'moss':'primary')+'" href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer" data-a="act" data-id="'+id+'">'+(rec?'Open recipe':'Open it')+'</a>';
     var keepBtn='<button class="btn" data-a="keep-open" data-id="'+id+'">Keep</button>';
     var foreverBtn='<button class="txt" data-a="forever" data-id="'+id+'">Keep forever</button>';
-    h+='<div class="actions">'+(stale?binBtn+openBtn+keepBtn:openBtn+keepBtn+binBtn)+foreverBtn+'</div>';
+    h+='<div class="actions">'+(stale?binBtn+openBtn+keepBtn:openBtn+keepBtn+binBtn)+foreverBtn+shareBtn(it)+'</div>';
   }
   return h+'</article>';
 }
@@ -425,14 +436,14 @@ function lotdCard(){
   var it=lotdItem();if(!it)return '';
   var L=lotdGet()||{},id=esc(it.id),isLink=!isText(it),rec=it.type==='recipe';
   var tag=it.status==='forever'?'Keep forever':it.status==='done'?'Finished link':it.status==='keeper'?'Cookbook keeper':kindLabel(it);
-  var h='<article class="card lotd"><p class="lotd-tag">Link of the Day</p><h3>'+esc(it.title)+'</h3><p class="job">'+esc(it.job)+'</p>'+itemBody(it)+
+  var h='<article class="card lotd"><p class="lotd-tag">Link of the Day</p><h3>'+esc(it.title)+'</h3><p class="job">'+esc(it.job)+'</p>'+itemBody(it)+catBlock(it)+
     (it.takeaway?'<p class="note">'+esc(it.takeaway)+'</p>':'')+
     '<p class="meta">'+esc(tag)+', last visited '+ago(lastSeen(it))+'</p><div class="actions">';
   if(!L.seen){
     h+=isLink?'<a class="btn primary" href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer" data-a="lotd-seen" data-id="'+id+'">'+(rec?'Open recipe':'Open it')+'</a>'
              :'<button class="btn primary" data-a="lotd-seen" data-id="'+id+'">Seen it</button>';
   }else h+='<span class="meta" style="align-self:center">Visited today.</span>';
-  return h+'<button class="btn" data-a="lotd-other">Show another</button></div></article>';
+  return h+'<button class="btn" data-a="lotd-other">Show another</button>'+shareBtn(it)+'</div></article>';
 }
 /* free slots in the weekly three are filled from the imported sorting list, oldest first */
 function stagedForWeek(){
@@ -441,6 +452,208 @@ function stagedForWeek(){
   return stage.items.slice().sort(function(a,b){return (a.d||9e9)-(b.d||9e9);}).slice(0,free);
 }
 function stagedCard(it){return sweepCard(it).replace('<article class="card">','<article class="card staged"><p class="lotd-tag">From your import</p>');}
+/* ---------- summaries and categories (Claude, through the sort-item function in Supabase) ---------- */
+ui.sorting=ui.sorting||{};
+var sortOff=false,sortQueue=[],sortBusy=false;
+function canSort(){return !!(sb&&sbUser&&!sortOff);}
+function needsSort(i){
+  if(i.summary)return false;
+  if(i.status!=='open'&&i.status!=='forever'&&i.status!=='keeper'&&i.status!=='done')return false;
+  return i.type==='note'?!!i.text:i.type==='shot'?!!i.img:/^https?:\/\//i.test(i.url||'');
+}
+function allCategories(){
+  var c={};state.items.forEach(function(i){if(i.category)c[i.category]=(c[i.category]||0)+1;});
+  return Object.keys(c).sort(function(a,b){return c[b]-c[a];}).slice(0,40);
+}
+function normCat(v){v=String(v||'').replace(/\s+/g,' ').trim().slice(0,40);var ex=allCategories().filter(function(c){return c.toLowerCase()===v.toLowerCase();})[0];return ex||v;}
+function matchCat(i,v){return !v||(v==='__none'?!i.category:i.category===v);}
+async function sortOne(it,mode){
+  if(!sb.functions||!sb.functions.invoke){sortOff=true;ui.sortMsg='Summaries are not switched on yet.';return 'off';}
+  var body={kind:it.type,mode:mode||'sort',existing:allCategories()};
+  if(it.type==='note')body.text=it.text;else if(it.type==='shot')body.path=it.img;else{body.url=it.url;body.title=it.title;}
+  ui.sorting[it.id]=true;render();
+  var r;try{r=await sb.functions.invoke('sort-item',{body:body});}catch(e){r={error:e};}
+  delete ui.sorting[it.id];
+  if(r&&r.error){
+    var ctx=r.error.context,st=ctx&&ctx.status,info=null;
+    if(ctx&&ctx.json){try{info=await ctx.json();}catch(x){}}
+    if(!ctx){ui.sortMsg='Could not reach the summary service. Check your connection.';return 'stop';}
+    if(st===404||(info&&info.code==='not_configured')){sortOff=true;ui.sortMsg='Summaries are not switched on yet.';return 'off';}
+    if(st===429&&info&&info.code==='limit'){ui.sortUsage={used:info.used,limit:info.limit};ui.sortMsg=(info.message||'Monthly limit reached.')+' It starts again on the 1st.';return 'limit';}
+    if(st===401){ui.sortMsg='Please sign in again to use summaries.';return 'stop';}
+    if(mode!=='quiz')it.sortErr=(info&&info.message)||'Could not sort this one.';return 'err';
+  }
+  var d=r&&r.data;
+  if(mode==='quiz'){ui.sortUsage={used:d&&d.used,limit:d&&d.limit};var z=d&&cleanQz(d.quiz);if(z)it.qz=z;else it.qzNo=true;return d?'ok':'err';}
+  if(!d||!d.summary){it.sortErr='Could not sort this one.';return 'err';}
+  var z2=cleanQz(d.quiz);if(z2)it.qz=z2;else it.qzNo=true;
+  it.summary=d.summary;it.catOptions=Array.isArray(d.categories)?d.categories.slice(0,3):[];delete it.sortErr;
+  ui.sortUsage={used:d.used,limit:d.limit};return 'ok';
+}
+function queueSort(id,mode){var k=id+'|'+(mode||'sort');if(sortQueue.indexOf(k)<0)sortQueue.push(k);}
+function autoSortRecent(){
+  if(!canSort())return;
+  var t=now();
+  state.items.forEach(function(i){if(needsSort(i)&&!i.sortErr&&t-i.created<600000)queueSort(i.id);});
+  runQueue();
+}
+async function runQueue(){
+  if(sortBusy)return;
+  sortBusy=true;
+  while(sortQueue.length){
+    var parts=sortQueue.shift().split('|'),id=parts[0],mode=parts[1],it=find(id);
+    if(!it||(mode==='quiz'?!needsQuiz(it):!needsSort(it))){if(ui.backlog)ui.backlog.done++;continue;}
+    var res=await sortOne(it,mode);
+    if(ui.backlog)ui.backlog.done++;
+    if(res==='ok'||res==='err')commit();else{sortQueue.length=0;break;}
+  }
+  sortBusy=false;ui.backlog=null;render();
+}
+function catBlock(it){
+  if(ui.sorting[it.id])return '<p class="meta">Sorting...</p>';
+  var id=esc(it.id),h='';
+  if(it.summary)h+='<p class="summ">'+esc(it.summary)+'</p>';
+  else if(it.sortErr)h+='<p class="meta">'+esc(it.sortErr)+' <button class="txt" data-a="sort-retry" data-id="'+id+'">Try again</button></p>';
+  if(it.status==='binned'||!it.summary)return h;
+  var editing=ui.catEdit===it.id;
+  if(it.category&&!editing)return h+'<p class="meta">Category: <button class="cs on" data-a="cat-edit" data-id="'+id+'">'+esc(it.category)+'</button></p>';
+  var opts=(it.catOptions||[]).slice();
+  if(editing)allCategories().slice(0,6).forEach(function(c){if(opts.map(function(o){return o.toLowerCase();}).indexOf(c.toLowerCase())<0)opts.push(c);});
+  h+='<p class="meta" style="margin-bottom:.1rem">'+(it.category?'Change category:':'Pick a category:')+'</p><div>'+opts.map(function(c){
+    return '<button class="cs'+(c===it.category?' on':'')+'" data-a="cat-set" data-id="'+id+'" data-c="'+esc(c)+'">'+esc(c)+'</button>';}).join('')+
+    (editing?'':'<button class="cs" data-a="cat-edit" data-id="'+id+'">+ My own</button>')+'</div>';
+  if(editing)h+='<label for="f-cat-'+id+'" class="ask">Your own category</label><input type="text" id="f-cat-'+id+'" data-d="cat:'+id+'" value="'+draft('cat:'+it.id)+'" maxlength="40" data-autofocus>'+
+    '<div class="actions"><button class="btn" data-a="cat-save" data-id="'+id+'">Save category</button><button class="txt" data-a="cat-cancel">Cancel</button></div>';
+  return h;
+}
+function sortBlock(){
+  if(!sb||!sbUser)return '';
+  var n=state.items.filter(needsSort).length,u=ui.sortUsage,h='<div class="row"><h3>Summaries</h3>';
+  if(sortOff)h+='<p class="meta">'+esc(ui.sortMsg||'Summaries are not switched on yet.')+'</p>';
+  else if(ui.backlog)h+='<p class="meta">Sorting '+Math.min(ui.backlog.done+1,ui.backlog.total)+' of '+ui.backlog.total+'...</p><div class="actions"><button class="txt" data-a="sort-cancel">Stop</button></div>';
+  else{
+    h+=n?'<p class="meta">'+n+(n===1?' item has':' items have')+' no summary yet. Sorting sends each page\'s text, note or screenshot to Claude (Anthropic), which writes a short summary and suggests categories.</p><div class="actions"><button class="btn" data-a="sort-backlog">Sort my backlog</button></div>'
+           :'<p class="meta">Every item has a summary.</p>';
+    if(ui.sortMsg)h+='<p class="ok" role="status">'+esc(ui.sortMsg)+'</p>';
+  }
+  if(u&&!sortOff)h+='<p class="meta">Used '+u.used+' of '+u.limit+' this month.</p>';
+  return h+'</div>';
+}
+function catSelect(key,val){
+  var cats=allCategories();if(!cats.length)return '';
+  var cnt={};state.items.forEach(function(i){if(i.category)cnt[i.category]=(cnt[i.category]||0)+1;});
+  return '<label for="f-'+key+'" style="margin-top:0">Category</label><select id="f-'+key+'" data-d="'+key+'"><option value="">All categories</option>'+
+    cats.map(function(c){return '<option value="'+esc(c)+'"'+(val===c?' selected':'')+'>'+esc(c)+' ('+cnt[c]+')</option>';}).join('')+
+    '<option value="__none"'+(val==='__none'?' selected':'')+'>Not categorised yet</option></select>';
+}
+/* ---------- quiz: questions are written once by Claude from the saved content, stored on the item, and replayed free ---------- */
+function cleanQz(z){
+  if(!z||typeof z.question!=='string'||!Array.isArray(z.options)||z.options.length!==4||typeof z.answer!=='number'||z.answer<0||z.answer>3)return null;
+  return {q:z.question,o:z.options.map(String),a:z.answer,e:String(z.explanation||'')};
+}
+function validQz(q){return !!(q&&typeof q.q==='string'&&Array.isArray(q.o)&&q.o.length===4&&typeof q.a==='number'&&q.a>=0&&q.a<4);}
+function needsQuiz(i){
+  if(i.qz||i.qzNo)return false;
+  if(i.status!=='open'&&i.status!=='forever'&&i.status!=='keeper'&&i.status!=='done')return false;
+  return i.type==='note'?!!i.text:i.type==='shot'?!!i.img:/^https?:\/\//i.test(i.url||'');
+}
+function quizPool(){return state.items.filter(function(i){return i.status!=='binned'&&validQz(i.qz);});}
+function quizStats(){var a=0,c=0;state.items.forEach(function(i){a+=i.qn||0;c+=i.qc||0;});return {asked:a,right:c};}
+/* never-asked first, then the ones you missed, then the ones not asked for longest; a little randomness so it is not always the same five */
+function quizPick(n){
+  var t=now();
+  return quizPool().map(function(i){
+    var asked=i.qn||0,missed=asked-(i.qc||0),days=Math.min((t-(i.qlast||0))/DAY,60);
+    return {id:i.id,w:((asked===0?3:1)+missed*2+days/20)*(0.6+Math.random()*0.8)};
+  }).sort(function(a,b){return b.w-a.w;}).slice(0,n).map(function(x){return x.id;});
+}
+function shuffled(a){var r=a.slice();for(var i=r.length-1;i>0;i--){var k=Math.floor(Math.random()*(i+1)),t=r[i];r[i]=r[k];r[k]=t;}return r;}
+function quizOriginal(it){
+  var h='<div class="orig"><p class="meta">The original:</p><h3>'+esc(it.title)+'</h3>';
+  if(it.type==='note')h+='<p class="notetext">'+esc(it.text)+'</p><div class="actions">'+shareBtn(it)+'</div>';
+  else if(it.type==='shot'&&it.img)h+=itemBody(it)+'<p class="meta"><a data-imglink="'+esc(it.img)+'" target="_blank" rel="noopener noreferrer">Open the screenshot full size</a></p><div class="actions">'+shareBtn(it)+'</div>';
+  else h+='<div class="actions"><a class="btn primary" href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">Open the page</a>'+shareBtn(it)+'</div>';
+  return h+'</div>';
+}
+function quizHome(){
+  var pool=quizPool(),st=quizStats(),missing=state.items.filter(function(i){return needsSort(i)||(i.summary&&needsQuiz(i));}).length;
+  var h='<h2 class="sec" style="margin-top:.2rem">Quiz</h2><p>Questions about what you have saved, to see how much stuck. After each answer you get the original page, note or screenshot.</p>';
+  h+='<p class="meta"><strong>'+pool.length+'</strong> question'+(pool.length===1?'':'s')+' ready'+(st.asked?'. So far you have answered '+st.right+' of '+st.asked+' right.':'.')+'</p>';
+  if(pool.length)h+='<div class="actions"><button class="btn primary" data-a="quiz-start" data-n="5">Start a quiz ('+Math.min(5,pool.length)+' question'+(Math.min(5,pool.length)===1?'':'s')+')</button>'+(pool.length>=10?'<button class="btn" data-a="quiz-start" data-n="10">10 questions</button>':'')+'</div>';
+  if(sb&&sbUser){
+    if(sortOff)h+='<p class="meta">'+esc(ui.sortMsg||'Summaries are not switched on yet.')+'</p>';
+    else if(ui.backlog)h+='<p class="meta">Making questions: '+Math.min(ui.backlog.done+1,ui.backlog.total)+' of '+ui.backlog.total+'...</p><div class="actions"><button class="txt" data-a="sort-cancel">Stop</button></div>';
+    else{
+      if(missing)h+='<p class="meta">'+missing+' saved item'+(missing===1?' has':'s have')+' no question yet. Each one is written by Claude from the saved content and uses one of your monthly summaries. It does 25 at a time.</p><div class="actions"><button class="btn" data-a="quiz-make">Make questions</button></div>';
+      else if(!pool.length)h+='<p class="meta">Nothing to ask about yet. Save a few links, notes or screenshots and questions appear here.</p>';
+      if(ui.sortMsg)h+='<p class="ok" role="status">'+esc(ui.sortMsg)+'</p>';
+      if(ui.sortUsage&&ui.sortUsage.limit)h+='<p class="meta">Used '+ui.sortUsage.used+' of '+ui.sortUsage.limit+' this month.</p>';
+    }
+  }else if(!pool.length)h+='<p class="meta">Sign in to make questions from what you have saved.</p>';
+  return h;
+}
+function quizQuestion(){
+  var z=ui.quiz;
+  while(z.i<z.ids.length){var c=find(z.ids[z.i]);if(c&&validQz(c.qz))break;z.i++;}
+  if(z.i>=z.ids.length){z.done=true;return quizDone();}
+  var it=find(z.ids[z.i]),q=it.qz;
+  if(!z.order)z.order=shuffled([0,1,2,3]);
+  var answered=z.picked!=null,h='<h2 class="sec" style="margin-top:.2rem">Question '+(z.i+1)+' of '+z.ids.length+'</h2><p class="meta">'+esc(kindLabel(it))+', saved '+ago(it.created)+'. Score so far: '+z.score+'.</p><h3>'+esc(q.q)+'</h3>';
+  h+=z.order.map(function(idx,k){
+    var cls='qopt',mark='';
+    if(answered){if(idx===q.a){cls+=' good';mark='\u2713 ';}else if(k===z.picked){cls+=' bad';mark='\u2717 ';}}
+    return '<button class="'+cls+'" data-a="quiz-pick" data-k="'+k+'"'+(answered?' aria-disabled="true"':'')+'>'+mark+esc(q.o[idx])+'</button>';
+  }).join('');
+  if(answered){
+    var right=z.order[z.picked]===q.a;
+    h+='<p class="'+(right?'ok':'err')+'" role="status">'+(right?'Right.':'Not quite. The answer is: '+esc(q.o[q.a])+'.')+'</p>'+(q.e?'<p>'+esc(q.e)+'</p>':'')+quizOriginal(it)+
+      '<div class="actions"><button class="btn primary" data-a="quiz-next">'+(z.i+1>=z.ids.length?'See my score':'Next question')+'</button></div>';
+  }
+  return h+'<div class="actions"><button class="txt" data-a="quiz-quit">Stop the quiz</button></div>';
+}
+function quizDone(){
+  var z=ui.quiz,h='<h2 class="sec" style="margin-top:.2rem">Your score</h2><p><strong>'+z.score+' of '+z.results.length+'</strong> right.</p>';
+  h+=z.results.map(function(r){
+    var it=find(r.id);if(!it)return '';
+    return '<div class="row"><h3>'+(r.correct?'\u2713 ':'\u2717 ')+esc(it.qz?it.qz.q:it.title)+'</h3>'+(it.qz&&!r.correct?'<p class="meta">Answer: '+esc(it.qz.o[it.qz.a])+'</p>':'')+
+      '<p class="meta">'+esc(it.title)+'</p>'+(!isText(it)?'<div class="actions" style="margin-top:.3rem"><a class="txt" href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">Open the page</a></div>':'')+'</div>';
+  }).join('');
+  return h+'<div class="actions"><button class="btn primary" data-a="quiz-start" data-n="5">Another quiz</button><button class="txt" data-a="quiz-quit">Back to Quiz</button></div>';
+}
+function viewQuiz(){
+  if(ui.quiz&&ui.quiz.done)return quizDone();
+  if(ui.quiz)return quizQuestion();
+  return quizHome();
+}
+/* ---------- sharing (the phone's share sheet, which includes WhatsApp; WhatsApp Web or a saved picture on a computer) ---------- */
+function shareBtn(it){return '<button class="txt" data-a="share" data-id="'+esc(it.id)+'">Share</button>';}
+async function shotBlob(path){
+  if(imgCache[path]){try{var r=await fetch(imgCache[path]);return await r.blob();}catch(e){}}
+  return null;
+}
+async function shareItem(it){
+  ui.shareMsg='';
+  var title=it.title||'LinkDonkey';
+  if(it.type==='shot'){
+    var b=await shotBlob(it.img);
+    if(!b){
+      /* the browser only allows sharing right after a tap, so fetch the picture now and ask for another tap */
+      if(sb&&it.img){try{var dl=await sb.storage.from('shots').download(it.img);if(dl&&dl.data)imgCache[it.img]=URL.createObjectURL(dl.data);}catch(e){}}
+      ui.shareMsg=imgCache[it.img]?'The picture is ready. Tap Share again.':'The picture could not be loaded. Check your connection.';render();return;
+    }
+    var file=new File([b],'linkdonkey-screenshot.jpg',{type:'image/jpeg'});
+    if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
+      try{await navigator.share({files:[file]});return;}catch(e){if(e&&e.name==='AbortError')return;}
+    }
+    var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='linkdonkey-screenshot.jpg';document.body.appendChild(a);a.click();setTimeout(function(){a.remove();},1000);
+    ui.shareMsg='This device cannot send pictures to WhatsApp directly, so the picture was saved. Attach it in WhatsApp.';render();return;
+  }
+  var text=it.type==='note'?it.text:title,url=it.type==='note'?'':it.url;
+  if(navigator.share){
+    try{await navigator.share(url?{title:title,text:text,url:url}:{title:title,text:text});return;}catch(e){if(e&&e.name==='AbortError')return;}
+  }
+  window.open('https://wa.me/?text='+encodeURIComponent(text+(url?'\n'+url:'')),'_blank','noopener');
+}
 function viewWeek(){
   var h=lotdCard(),rc=recallDue(),cs=carried(),sg=stagedForWeek();
   if(rc.length){h+='<h2 class="sec">Still remember it?</h2>'+rc.map(cardRecall).join('');}
@@ -493,14 +706,14 @@ function archiveRows(){
   var rows=state.items.filter(function(i){return i.status==='done'||i.status==='binned';});
   if(ui.filter==='notes')rows=rows.filter(function(i){return i.takeaway;});
   if(ui.filter==='binned')rows=rows.filter(function(i){return i.status==='binned';});
-  if(q)rows=rows.filter(function(i){return [i.title,i.job,i.takeaway,i.tweak,i.url,i.text].join(' ').toLowerCase().indexOf(q)>-1;});
+  if(q)rows=rows.filter(function(i){return [i.title,i.job,i.takeaway,i.tweak,i.url,i.text,i.summary,i.category].join(' ').toLowerCase().indexOf(q)>-1;});
   rows.sort(function(a,b){return (b.clearedAt||0)-(a.clearedAt||0);});
   if(!rows.length)return '<p class="empty">'+(state.items.some(function(i){return i.status==='done'||i.status==='binned';})?'Nothing matches.':'Cleared links land here. They are searchable and never come back on their own.')+'</p>';
   return rows.map(function(it){
-    return '<div class="row"><h3>'+(isText(it)?esc(it.title):'<a href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">'+esc(it.title)+'</a>')+'</h3>'+itemBody(it)+
+    return '<div class="row"><h3>'+(isText(it)?esc(it.title):'<a href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">'+esc(it.title)+'</a>')+'</h3>'+itemBody(it)+catBlock(it)+
       '<p class="meta">'+esc(it.job)+'</p><p class="meta">'+(it.status==='binned'?'Binned ':'Cleared ')+ago(it.clearedAt||it.created)+'</p>'+
       (it.takeaway?'<p class="note">'+esc(it.takeaway)+'</p>':'')+
-      (it.status==='binned'?'<div class="actions" style="margin-top:.3rem"><button class="txt" data-a="unbin" data-id="'+esc(it.id)+'">Bring back</button></div>':'')+'</div>';
+      (it.status==='binned'?'<div class="actions" style="margin-top:.3rem"><button class="txt" data-a="unbin" data-id="'+esc(it.id)+'">Bring back</button></div>':'<div class="actions" style="margin-top:.3rem">'+shareBtn(it)+'</div>')+'</div>';
   }).join('');
 }
 function waitingRows(){
@@ -511,23 +724,24 @@ function waitingRows(){
     if(f==='recipes'&&i.type!=='recipe')return false;
     if(f==='notes'&&i.type!=='note')return false;
     if(f==='shots'&&i.type!=='shot')return false;
-    return !q||[i.title,i.job,i.url,i.text].join(' ').toLowerCase().indexOf(q)>-1;
+    if(!matchCat(i,ui.wc))return false;
+    return !q||[i.title,i.job,i.url,i.text,i.summary,i.category].join(' ').toLowerCase().indexOf(q)>-1;
   }).sort(function(a,b){return b.created-a.created;});
   if(!rows.length)return '<p class="empty">'+(openItems().length?'Nothing matches.':'Nothing waiting. Save a link, note or screenshot and it lands here.')+'</p>';
   return rows.map(function(it){
     var id=esc(it.id);
     var st=inWeek[it.id]?'In This week':(it.snoozeUntil&&it.snoozeUntil>t?'Kept until '+new Date(it.snoozeUntil).toLocaleDateString():'Waiting its turn');
-    return '<div class="row"><h3>'+(isText(it)?esc(it.title):'<a href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">'+esc(it.title)+'</a>')+'</h3>'+itemBody(it)+
+    return '<div class="row"><h3>'+(isText(it)?esc(it.title):'<a href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">'+esc(it.title)+'</a>')+'</h3>'+itemBody(it)+catBlock(it)+
       '<p class="meta">'+esc(it.job)+'</p><p class="meta">'+esc(kindLabel(it))+', saved '+ago(it.created)+'. '+st+'.</p>'+
       '<div class="actions" style="margin-top:.3rem">'+(inWeek[it.id]?'':'<button class="txt" data-a="w-front" data-id="'+id+'">Bring to This week</button>')+'<button class="txt" data-a="forever" data-id="'+id+'">Keep forever</button>'+
-      '<button class="txt" data-a="bin" data-id="'+id+'">Bin</button></div></div>';
+      '<button class="txt" data-a="bin" data-id="'+id+'">Bin</button>'+shareBtn(it)+'</div></div>';
   }).join('');
 }
 function viewWaiting(){
   var f=ui.wf||'all',n=openItems().length;
   function chip(k,l){return '<button data-a="wfilter" data-f="'+k+'" aria-pressed="'+(f===k)+'">'+l+'</button>';}
   return '<h2 class="sec" style="margin-top:.2rem">Waiting</h2><p class="meta">'+n+(n===1?' item':' items')+' saved and not finished yet. Newest first.</p>'+
-    '<label for="f-wq" style="margin-top:0">Search</label><input type="search" id="f-wq" data-d="wq" value="'+esc(ui.wq||'')+'" autocomplete="off">'+
+    sortBlock()+catSelect('wcat',ui.wc)+'<label for="f-wq" style="margin-top:0">Search</label><input type="search" id="f-wq" data-d="wq" value="'+esc(ui.wq||'')+'" autocomplete="off">'+
     '<div class="chips">'+chip('all','All')+chip('links','Links')+chip('recipes','Recipes')+chip('notes','Notes')+chip('shots','Screenshots')+'</div>'+
     '<div id="waiting-list">'+waitingRows()+'</div>';
 }
@@ -539,21 +753,22 @@ function foreverRows(){
     if(f==='recipes'&&i.type!=='recipe')return false;
     if(f==='notes'&&i.type!=='note')return false;
     if(f==='shots'&&i.type!=='shot')return false;
-    return !q||[i.title,i.job,i.url,i.text,i.takeaway].join(' ').toLowerCase().indexOf(q)>-1;
+    if(!matchCat(i,ui.fc))return false;
+    return !q||[i.title,i.job,i.url,i.text,i.takeaway,i.summary,i.category].join(' ').toLowerCase().indexOf(q)>-1;
   }).sort(function(a,b){return (b.foreverAt||0)-(a.foreverAt||0);});
   if(!rows.length)return '<p class="empty">'+(state.items.some(function(i){return i.status==='forever';})?'Nothing matches.':'Nothing here yet. Tap Keep forever on a card, in Waiting, or when you save.')+'</p>';
   return rows.map(function(it){
     var id=esc(it.id);
-    return '<div class="row"><h3>'+(isText(it)?esc(it.title):'<a href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">'+esc(it.title)+'</a>')+'</h3>'+itemBody(it)+
+    return '<div class="row"><h3>'+(isText(it)?esc(it.title):'<a href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">'+esc(it.title)+'</a>')+'</h3>'+itemBody(it)+catBlock(it)+
       '<p class="meta">'+esc(it.job)+'</p><p class="meta">'+esc(kindLabel(it))+', on the shelf since '+ago(it.foreverAt||it.created)+'.</p>'+
-      '<div class="actions" style="margin-top:.3rem"><button class="txt" data-a="unforever" data-id="'+id+'">Take off the shelf</button></div></div>';
+      '<div class="actions" style="margin-top:.3rem"><button class="txt" data-a="unforever" data-id="'+id+'">Take off the shelf</button>'+shareBtn(it)+'</div></div>';
   }).join('');
 }
 function viewForever(){
   var f=ui.ff||'all',n=state.items.filter(function(i){return i.status==='forever';}).length;
   function chip(k,l){return '<button data-a="ffilter" data-f="'+k+'" aria-pressed="'+(f===k)+'">'+l+'</button>';}
   return '<h2 class="sec" style="margin-top:.2rem">Keep forever</h2><p class="meta">'+n+(n===1?' item':' items')+'. The app never bins or deletes these, and they stay out of the weekly queue.</p>'+
-    '<label for="f-fq" style="margin-top:0">Search</label><input type="search" id="f-fq" data-d="fq" value="'+esc(ui.fq||'')+'" autocomplete="off">'+
+    sortBlock()+catSelect('fcat',ui.fc)+'<label for="f-fq" style="margin-top:0">Search</label><input type="search" id="f-fq" data-d="fq" value="'+esc(ui.fq||'')+'" autocomplete="off">'+
     '<div class="chips">'+chip('all','All')+chip('links','Links')+chip('recipes','Recipes')+chip('notes','Notes')+chip('shots','Screenshots')+'</div>'+
     '<div id="forever-list">'+foreverRows()+'</div>';
 }
@@ -623,8 +838,8 @@ function viewArchive(){
 }
 function render(){
   if(ui.auth==='out'||ui.auth==='sent'){$('#app').innerHTML=authView();var af=$('[data-autofocus]');if(af)af.focus();return;}
-  var v={week:viewWeek,waiting:viewWaiting,forever:viewForever,save:viewSave,import:viewImport,cookbook:viewCookbook,archive:viewArchive}[ui.tab]();
-  $('#app').innerHTML=header()+nav()+'<main>'+v+'</main>';
+  var v={week:viewWeek,quiz:viewQuiz,waiting:viewWaiting,forever:viewForever,save:viewSave,import:viewImport,cookbook:viewCookbook,archive:viewArchive}[ui.tab]();
+  $('#app').innerHTML=header()+nav()+'<main>'+(ui.shareMsg?'<p class="ok" role="status">'+esc(ui.shareMsg)+'</p>':'')+v+'</main>';
   paintStatus();hydrateShots();
   if(ui.focus){var f=$('[data-autofocus]');if(f)f.focus();ui.focus=false;}
   if(ui.focusId){var f2=document.getElementById(ui.focusId);if(f2)f2.focus();ui.focusId=null;}
@@ -847,13 +1062,40 @@ function recentBlock(){
     return '<div class="row"><h3>'+esc(i.t)+'</h3><p class="meta">'+esc(i.h)+'</p><div class="actions" style="margin-top:.3rem"><button class="txt" data-a="imp-restore" data-id="'+esc(i.id)+'">Restore</button></div></div>';
   }).join('')+'<div class="actions"><button class="txt" data-a="imp-restoreall">Restore all '+stage.binned.length+' binned</button></div>';
 }
+/* ---------- clean-up: which Chrome bookmarks are safe to remove ---------- */
+/* Safe = a decision is recorded here: kept (open, parked, done, keeper, forever) or binned. Anything still unsorted in the import list is never safe. */
+function cleanupSets(){
+  var unsorted={},safe={},kept=0,binned=0;
+  stage.items.forEach(function(i){unsorted[norm(i.u)]=1;});
+  function add(u,kind){
+    if(!/^https?:\/\//i.test(u||''))return;
+    var k=norm(u);if(unsorted[k]||safe[k])return;
+    safe[k]=kind;if(kind==='kept')kept++;else binned++;
+  }
+  state.items.forEach(function(i){if(i.url)add(i.url,i.status==='binned'?'binned':'kept');});
+  stage.binned.forEach(function(i){add(i.u,'binned');});
+  return {keys:Object.keys(safe),kept:kept,binned:binned,waiting:stage.items.length};
+}
+function cleanupBlock(){
+  if(isTouch())return '';
+  var c=cleanupSets(),h='<h2 class="sec">Remove from Chrome</h2>';
+  if(!c.keys.length)return h+'<p class="meta">Nothing is safe to remove yet. A bookmark becomes safe once you have kept it or binned it here. Links still waiting in your sorting list always stay in Chrome.</p>';
+  return h+'<p><strong>'+c.keys.length+'</strong> bookmarks are safe to remove from Chrome: '+c.kept+' you kept here and '+c.binned+' you binned. The '+c.waiting+' still waiting to be sorted stay in Chrome.</p>'+
+    '<div class="actions"><button class="btn primary" data-a="copy-safe">Copy the safe list</button></div>'+
+    (ui.cleanMsg?'<p class="ok" role="status">'+esc(ui.cleanMsg)+'</p>':'')+
+    (ui.cleanFallback?'<label for="f-safe">Select all and copy</label><textarea id="f-safe" rows="3" readonly>'+esc(ui.cleanFallback)+'</textarea>':'')+
+    '<details><summary class="sum">How to use the Chrome add-on</summary><ol class="steps">'+
+    '<li>Install it once. Unzip the LinkDonkey Cleaner file. In Chrome open chrome://extensions, switch on Developer mode (top right), click Load unpacked, and choose the linkdonkey-cleaner folder.</li>'+
+    '<li>Tap Copy the safe list above.</li>'+
+    '<li>Click the add-on button in Chrome (the donkey, or under the puzzle piece). Paste the list, then follow its three steps. It saves a backup file before it removes anything.</li></ol></details>';
+}
 function viewImport(){return (ui.stageErr?'<p class="err" role="alert">The sorting list could not be saved online. It is safe on this device and will try again.</p>':'')+viewImportInner();}
 function viewImportInner(){
   var n=stage.items.length,h='<h2 class="sec" style="margin-top:.2rem">Import from Chrome</h2>';
   if(ui.imp)h+='<p class="ok" role="status">'+esc(ui.imp)+'</p>';
   if(!n){
     if(stage.binned.length||stage.kept)h+='<p class="empty">All swept. '+stage.kept+' kept, '+stage.binned.length+' binned.</p>';
-    return h+sourcesBlock()+
+    return h+cleanupBlock()+sourcesBlock()+
       '<p class="meta">Nothing changes in Chrome or YouTube. The app only sorts a copy.</p>'+recentBlock()+exportBlock();
   }
   var list=sweepList(),gs=groups();
@@ -871,7 +1113,7 @@ function viewImportInner(){
   else sw+='<p class="empty">Nothing left in this view.</p>';
   /* once a group is chosen the sweep card comes first, so tapping Sweep these visibly does something */
   h+=ui.sf?sw+cuts:cuts+sw;
-  return h+recentBlock()+'<h2 class="sec">Add more</h2>'+sourcesBlock()+exportBlock()+'<p class="meta" style="margin-top:1.5rem">Version '+BUILD+'</p>';
+  return h+recentBlock()+cleanupBlock()+'<h2 class="sec">Add more</h2>'+sourcesBlock()+exportBlock()+'<p class="meta" style="margin-top:1.5rem">Version '+BUILD+'</p>';
 }
 document.addEventListener('click',function(e){
   var el=e.target.closest('[data-a]');if(!el)return;
@@ -903,7 +1145,7 @@ document.addEventListener('click',function(e){
       if(!job){ui.err[id]='Say what it is for, or bin it.';ui.focus=true;render();break;}
       stage.items.splice(idx,1);stage.kept++;
       state.items.push({id:uid(),url:it.u,title:it.t,job:job,type:typ,status:'open',created:now(),touched:now()});
-      delete ui.drafts['ikeep:'+id];delete ui.err[id];ui.kp=null;saveStage();commit();break;
+      delete ui.drafts['ikeep:'+id];delete ui.err[id];ui.kp=null;saveStage();commit();autoSortRecent();break;
     case 'imp-restore':
       var k=stage.binned.findIndex(function(i){return i.id===id;});
       if(k>-1){stage.items.push(stage.binned.splice(k,1)[0]);sortStage();saveStage();render();}
@@ -1045,7 +1287,7 @@ function prefillFromUrl(){
       ui.drafts.url=u;ui.drafts.title=cleanTitle(t||'');ui.tab='save';ui.focusId='f-job';
       ui.ok='Link filled in. Say what it is for, then save.';
     }else if(tx||t){
-      ui.saveType='note';ui.drafts.note=tx||t;if(tx&&t)ui.drafts.title=cleanTitle(t);
+      ui.saveType='note';ui.sharedNote=true;ui.drafts.note=tx||t;if(tx&&t)ui.drafts.title=cleanTitle(t);
       ui.tab='save';ui.focusId='f-job';ui.ok='Note filled in. Say what it is for, then save.';
     }
     /* drop the query so a reload does not refill; keep the hash, Supabase reads its sign-in tokens from it */
@@ -1077,7 +1319,8 @@ document.addEventListener('click',function(e){
     case 'auth-out':
       if(!confirm('Sign out? Your links stay in your account.'))break;
       sb.auth.signOut().finally(function(){remote=null;sbUser=null;state={v:1,rev:0,items:[]};saveLocal();stage={v:1,folders:[],items:[],binned:[],dupes:0,kept:0};saveStageLocal();try{localStorage.removeItem(UID_KEY);localStorage.removeItem(LOTD_KEY);}catch(x){}ui.auth='out';render();});break;
-    case 'tab':ui.tab=el.dataset.tab;ui.panel=null;ui.ok='';render();break;
+    case 'tab':ui.tab=el.dataset.tab;ui.panel=null;ui.ok='';ui.shareMsg='';render();break;
+    case 'share':if(it)shareItem(it);break;
     case 'type':ui.saveType=el.dataset.t;render();break;
     case 'filter':ui.filter=el.dataset.f;render();break;
     case 'backup':{
@@ -1087,6 +1330,44 @@ document.addEventListener('click',function(e){
         ui.backupMsg='Backup downloaded. Keep the file somewhere safe, away from this device if you can.';render();
       });
       break;}
+    case 'copy-safe':{
+      var cs=cleanupSets(),payload=JSON.stringify({app:'linkdonkey-cleanup',v:1,made:new Date().toISOString(),keys:cs.keys});
+      ui.cleanFallback='';
+      var copied=function(){ui.cleanMsg='Copied '+cs.keys.length+' links. Now open the add-on in Chrome and paste.';render();};
+      var failed=function(){ui.cleanMsg='It could not copy by itself. Select the text below and copy it.';ui.cleanFallback=payload;render();};
+      if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(payload).then(copied,failed);else failed();
+      break;}
+    case 'cat-set':if(it){it.category=normCat(el.dataset.c);ui.catEdit=null;commit();}break;
+    case 'cat-edit':if(it){ui.catEdit=it.id;ui.focus=true;render();}break;
+    case 'cat-cancel':ui.catEdit=null;render();break;
+    case 'cat-save':
+      if(it){var cv=normCat(d['cat:'+id]);if(cv){it.category=cv;delete d['cat:'+id];ui.catEdit=null;commit();}else{ui.catEdit=null;render();}}
+      break;
+    case 'sort-retry':if(it){delete it.sortErr;queueSort(it.id);runQueue();}break;
+    case 'sort-backlog':
+      state.items.filter(needsSort).forEach(function(i){queueSort(i.id);});
+      ui.sortMsg='';ui.backlog={total:sortQueue.length,done:0};runQueue();break;
+    case 'sort-cancel':sortQueue.length=0;ui.sortMsg='Stopped.';render();break;
+    case 'quiz-start':
+      ui.quiz={ids:quizPick(parseInt(el.dataset.n,10)||5),i:0,score:0,picked:null,order:null,results:[],done:false};
+      if(!ui.quiz.ids.length)ui.quiz=null;render();window.scrollTo(0,0);break;
+    case 'quiz-pick':{
+      var z=ui.quiz;if(!z||z.picked!=null)break;
+      var qit=find(z.ids[z.i]);if(!qit||!validQz(qit.qz))break;
+      z.picked=parseInt(el.dataset.k,10);
+      var good=z.order[z.picked]===qit.qz.a;if(good)z.score++;
+      z.results.push({id:qit.id,correct:good});
+      qit.qn=(qit.qn||0)+1;if(good)qit.qc=(qit.qc||0)+1;qit.qlast=now();
+      saveLocal();render();break;}
+    case 'quiz-next':
+      if(ui.quiz){ui.quiz.i++;ui.quiz.picked=null;ui.quiz.order=null;if(ui.quiz.i>=ui.quiz.ids.length){ui.quiz.done=true;commit();}else render();}
+      break;
+    case 'quiz-quit':
+      if(ui.quiz&&ui.quiz.results.length)commit();
+      ui.quiz=null;render();break;
+    case 'quiz-make':
+      state.items.filter(function(i){return needsSort(i)||(i.summary&&needsQuiz(i));}).slice(0,25).forEach(function(i){queueSort(i.id,needsSort(i)?'sort':'quiz');});
+      ui.sortMsg='';ui.backlog={total:sortQueue.length,done:0};runQueue();break;
     case 'wfilter':ui.wf=el.dataset.f;render();break;
     case 'ffilter':ui.ff=el.dataset.f;render();break;
     case 'ftoggle':ui.saveForever=!ui.saveForever;render();break;
@@ -1128,6 +1409,8 @@ document.addEventListener('click',function(e){
 document.addEventListener('input',function(e){
   var k=e.target.dataset&&e.target.dataset.d;if(!k)return;
   if(k==='q'){ui.q=e.target.value;var l=$('#archive-list');if(l)l.innerHTML=archiveRows();}
+  else if(k==='wcat'){ui.wc=e.target.value;render();}
+  else if(k==='fcat'){ui.fc=e.target.value;render();}
   else if(k==='fq'){ui.fq=e.target.value;var fl=$('#forever-list');if(fl){fl.innerHTML=foreverRows();hydrateShots();}}
   else if(k==='wq'){ui.wq=e.target.value;var wl=$('#waiting-list');if(wl){wl.innerHTML=waitingRows();hydrateShots();}}
   else ui.drafts[k]=e.target.value;
@@ -1144,8 +1427,8 @@ document.addEventListener('submit',async function(e){
     if(!job){ui.formErr='Say what it is for. That is what makes it easy to act on later.';return render();}
     state.items.push({id:uid(),url:'',type:'note',text:text,title:title||firstLine(text),job:job,status:st,foreverAt:fa,created:now(),touched:now()});
     ui.drafts.note='';ui.drafts.job='';ui.drafts.title='';
-    ui.ok=savedMsg(st);ui.saveForever=false;
-    return commit();
+    ui.ok=savedMsg(st)+(ui.sharedNote?' You can delete the original note in the app you shared it from.':'');ui.sharedNote=false;ui.saveForever=false;
+    commit();autoSortRecent();return;
   }
   if(t==='shot'){
     var pics=ui.pics||[],many=pics.length>1;
@@ -1168,12 +1451,12 @@ document.addEventListener('submit',async function(e){
     ui.pics=pics.slice(done);ui.shotUrl=ui.pics.length===1?URL.createObjectURL(ui.pics[0]):'';
     if(bad){
       ui.formErr=(done?'Saved '+done+' of '+pics.length+'. ':'')+'Could not upload the rest. Check your connection, then tap Save again.';
-      if(done)commit();else render();
+      if(done){commit();autoSortRecent();}else render();
       return;
     }
     ui.drafts.job='';ui.drafts.title='';
-    ui.ok=many?'Saved '+done+' screenshots'+(st==='forever'?' to Keep forever.':'.'):savedMsg(st);ui.saveForever=false;
-    return commit();
+    ui.ok=(many?'Saved '+done+' screenshots'+(st==='forever'?' to Keep forever.':'.'):savedMsg(st))+' '+(many?'The originals are':'The original is')+' safe in your account, so you can delete '+(many?'them':'it')+' from your Gallery.';ui.saveForever=false;
+    commit();autoSortRecent();return;
   }
   var u=(d.url||'').trim();
   if(!u){ui.formErr='Paste a link first.';return render();}
@@ -1185,7 +1468,7 @@ document.addEventListener('submit',async function(e){
   state.items.push({id:uid(),url:u,title:title||niceTitle(u),job:job,type:t,status:st,foreverAt:fa,created:now(),touched:now()});
   ui.drafts.url='';ui.drafts.job='';ui.drafts.title='';
   ui.ok=savedMsg(st);ui.saveForever=false;
-  commit();
+  commit();autoSortRecent();
 });
 
 loadLocal();
