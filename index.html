@@ -121,7 +121,7 @@ details[open] summary.sum{margin-bottom:.2rem}
 (function(){
 'use strict';
 var DAY=864e5, STALE_DAYS=30, SLOTS=3, KEEP_DAYS=7, STEPS=[3,10,30,90];
-var BUILD='2026-10-01 a';
+var BUILD='2026-10-01 b';
 var LS_KEY='linkdonkey.v1';
 /* Supabase project values. The anon/publishable key is public by design; row-level security protects the data. */
 var SB_URL='https://vkreqwhpnxcduqoiifmx.supabase.co', SB_KEY='sb_publishable_q6CciDmqm967BHjGLu9aSA_2XBApgGd';
@@ -247,7 +247,7 @@ function paintStatus(){
   el.textContent=t||'';
 }
 function header(){
-  var c=carried().length, hasOpen=openItems().length>0;
+  var c=carried().length+stagedForWeek().length, hasOpen=openItems().length>0||stage.items.length>0;
   var cleared=state.items.filter(function(i){return i.clearedAt&&i.clearedAt>=monthStart();}).length;
   var notes=state.items.filter(function(i){return i.takeaway;}).length;
   var head=(c===0&&!hasOpen)?'Unloaded.':'Carrying '+c+' of '+SLOTS+'.';
@@ -408,15 +408,24 @@ function lotdCard(){
   }else h+='<span class="meta" style="align-self:center">Visited today.</span>';
   return h+'<button class="btn" data-a="lotd-other">Show another</button></div></article>';
 }
+/* free slots in the weekly three are filled from the imported sorting list, oldest first */
+function stagedForWeek(){
+  var free=SLOTS-carried().length;
+  if(free<=0||!stage.items.length)return [];
+  return stage.items.slice().sort(function(a,b){return (a.d||9e9)-(b.d||9e9);}).slice(0,free);
+}
+function stagedCard(it){return sweepCard(it).replace('<article class="card">','<article class="card staged"><p class="lotd-tag">From your import</p>');}
 function viewWeek(){
-  var h=lotdCard(),rc=recallDue(),cs=carried();
+  var h=lotdCard(),rc=recallDue(),cs=carried(),sg=stagedForWeek();
   if(rc.length){h+='<h2 class="sec">Still remember it?</h2>'+rc.map(cardRecall).join('');}
   if(cs.length){h+=cs.map(cardOpen).join('');}
-  else{h+='<p class="empty">'+(openItems().length?'Everything left is kept for later. It comes back when its week is up.':'Nothing to carry. Save a link with a reason and it lands here.')+'</p>'+
+  if(sg.length){h+=sg.map(stagedCard).join('');}
+  if(!cs.length&&!sg.length){h+='<p class="empty">'+(openItems().length?'Everything left is kept for later. It comes back when its week is up.':'Nothing to carry. Save a link with a reason and it lands here.')+'</p>'+
     '<div class="actions"><button class="btn primary" data-a="tab" data-tab="save">Save a link</button></div>';}
   var waiting=eligible().length-cs.length, snoozed=openItems().length-eligible().length, bits=[];
   if(waiting>0)bits.push(waiting+' more waiting. They come in as you clear a load.');
   if(snoozed>0)bits.push(snoozed+' kept for later.');
+  if(stage.items.length>sg.length)bits.push((stage.items.length-sg.length)+' more in your import list. They come up as you clear a load.');
   if(bits.length)h+='<p class="meta">'+bits.join(' ')+'</p>';
   return h;
 }
