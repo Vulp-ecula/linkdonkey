@@ -121,6 +121,7 @@ details[open] summary.sum{margin-bottom:.2rem}
 (function(){
 'use strict';
 var DAY=864e5, STALE_DAYS=30, SLOTS=3, KEEP_DAYS=7, STEPS=[3,10,30,90];
+var BUILD='2026-10-01 a';
 var LS_KEY='linkdonkey.v1';
 /* Supabase project values. The anon/publishable key is public by design; row-level security protects the data. */
 var SB_URL='https://vkreqwhpnxcduqoiifmx.supabase.co', SB_KEY='sb_publishable_q6CciDmqm967BHjGLu9aSA_2XBApgGd';
@@ -764,18 +765,20 @@ function viewImportInner(){
   }
   var list=sweepList(),gs=groups();
   h+='<p class="tally">'+n+' waiting to be sorted. Nothing changes in Chrome. '+(sb&&sbUser&&!stageOff?'This list syncs to your other devices, so you can sweep on your phone too.':'Links you keep sync to your other devices. This list stays on this device.')+'</p>';
-  h+='<h2 class="sec">Quick cuts</h2>'+(gs.length?gs.map(function(x){
+  var cuts='<h2 class="sec">Quick cuts</h2>'+(gs.length?gs.map(function(x){
     return '<div class="row"><h3>'+esc(x.label)+'</h3><p class="meta">'+x.n+' links</p><div class="actions" style="margin-top:.4rem">'+
       '<button class="btn" data-a="imp-sweep" data-g="'+esc(x.key)+'">Sweep these</button>'+binAllBtn(x.key,'Bin all '+x.n)+'</div></div>';
   }).join(''):'<p class="meta">No obvious groups. Go straight to the sweep.</p>');
-  h+='<h2 class="sec" id="sweep-h">Sweep</h2>';
+  var sw='<h2 class="sec" id="sweep-h">Sweep</h2>';
   if(ui.sf){
     var lbl=(gs.filter(function(x){return x.key===ui.sf;})[0]||{}).label||'this group';
-    h+='<p class="meta">Showing '+esc(lbl)+'. '+list.length+' left.</p><div class="actions" style="margin:0 0 .8rem"><button class="txt" data-a="imp-clearf">Show everything</button></div>';
-  }else h+='<p class="meta">'+list.length+' left, oldest first. On a keyboard, B bins and K keeps.</p>';
-  if(list.length)h+=sweepCard(list[0])+'<div class="actions">'+binAllBtn('rest','Bin everything left ('+list.length+')')+'</div>';
-  else h+='<p class="empty">Nothing left in this view.</p>';
-  return h+recentBlock()+'<h2 class="sec">Add more</h2>'+sourcesBlock()+exportBlock();
+    sw+='<p class="meta">Showing '+esc(lbl)+'. '+list.length+' left.</p><div class="actions" style="margin:0 0 .8rem"><button class="txt" data-a="imp-clearf">Back to all groups</button></div>';
+  }else sw+='<p class="meta">'+list.length+' left, oldest first. On a keyboard, B bins and K keeps.</p>';
+  if(list.length)sw+=sweepCard(list[0])+'<div class="actions">'+binAllBtn('rest','Bin everything left ('+list.length+')')+'</div>';
+  else sw+='<p class="empty">Nothing left in this view.</p>';
+  /* once a group is chosen the sweep card comes first, so tapping Sweep these visibly does something */
+  h+=ui.sf?sw+cuts:cuts+sw;
+  return h+recentBlock()+'<h2 class="sec">Add more</h2>'+sourcesBlock()+exportBlock()+'<p class="meta" style="margin-top:1.5rem">Version '+BUILD+'</p>';
 }
 document.addEventListener('click',function(e){
   var el=e.target.closest('[data-a]');if(!el)return;
@@ -791,7 +794,7 @@ document.addEventListener('click',function(e){
   if(a.indexOf('imp-')!==0)return;
   if(a!=='imp-binall')ui.confirm=null;
   switch(a){
-    case 'imp-sweep':ui.sf=g;ui.kp=null;render();(function(){var h=document.getElementById('sweep-h');if(h&&h.scrollIntoView)h.scrollIntoView({behavior:'smooth',block:'start'});})();break;
+    case 'imp-sweep':ui.sf=g;ui.kp=null;render();window.scrollTo(0,0);break;
     case 'imp-clearf':ui.sf=null;render();break;
     case 'imp-binall':
       if(ui.confirm!==g){ui.confirm=g;render();break;}
