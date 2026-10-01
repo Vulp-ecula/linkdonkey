@@ -134,7 +134,7 @@ details[open] summary.sum{margin-bottom:.2rem}
 (function(){
 'use strict';
 var DAY=864e5, STALE_DAYS=30, SLOTS=3, KEEP_DAYS=7, STEPS=[3,10,30,90];
-var BUILD='2026-10-01 l';
+var BUILD='2026-10-01 m';
 var LS_KEY='linkdonkey.v1';
 /* Supabase project values. The anon/publishable key is public by design; row-level security protects the data. */
 var SB_URL='https://vkreqwhpnxcduqoiifmx.supabase.co', SB_KEY='sb_publishable_q6CciDmqm967BHjGLu9aSA_2XBApgGd';
@@ -349,10 +349,10 @@ document.addEventListener('change',function(e){
   ui.formErr='';
   setPics(Array.prototype.slice.call(e.target.files||[]));
 });
-function cardOpen(it){
+function cardOpen(it,opts){
   var rec=it.type==='recipe', p=(ui.panel&&ui.panel.id===it.id)?ui.panel.kind:null, id=esc(it.id);
   var h='<article class="card'+(rec?' recipe':'')+'"><h3>'+esc(it.title)+'</h3><p class="job">'+esc(it.job)+'</p>'+
-    itemBody(it)+catBlock(it)+'<p class="meta">'+esc(kindLabel(it))+', saved '+ago(it.created)+'</p>';
+    (opts&&opts.noBody?'':itemBody(it))+catBlock(it)+'<p class="meta">'+esc(kindLabel(it))+', saved '+ago(it.created)+'</p>';
   if(it.keepReason)h+='<p class="meta">Kept because: '+esc(it.keepReason)+'</p>';
   if(isStale(it)&&!it.acting&&!p)h+='<p class="stale">Untouched for over 30 days. Bin it unless you can say why it stays.</p>';
   if(p==='keep'){
@@ -613,7 +613,7 @@ function quizQuestion(){
   }).join('');
   if(answered){
     var right=z.order[z.picked]===q.a;
-    h+='<p class="'+(right?'ok':'err')+'" role="status">'+(right?'Right.':'Not quite. The answer is: '+esc(q.o[q.a])+'.')+'</p>'+(q.e?'<p>'+esc(q.e)+'</p>':'')+quizOriginal(it)+
+    h+='<p class="'+(right?'ok':'err')+'" role="status">'+(right?'Right.':'Not quite. The answer is: '+esc(q.o[q.a])+'.')+'</p>'+(q.e?'<p>'+esc(q.e)+'</p>':'')+quizAfter(it)+
       '<div class="actions"><button class="btn primary" data-a="quiz-next">'+(z.i+1>=z.ids.length?'See my score':'Next question')+'</button></div>';
   }
   return h+'<div class="actions">'+(answered?'':'<button class="txt" data-a="quiz-bad">This question does not make sense</button>')+'<button class="txt" data-a="quiz-quit">Stop the quiz</button></div>';
@@ -626,6 +626,20 @@ function quizDone(){
       '<p class="meta">'+esc(it.title)+'</p>'+(!isText(it)?'<div class="actions" style="margin-top:.3rem"><a class="txt" href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">Open the page</a></div>':'')+'</div>';
   }).join('');
   return h+'<div class="actions"><button class="btn primary" data-a="quiz-start" data-n="5">Another quiz</button><button class="txt" data-a="quiz-quit">Back to Quiz</button></div>';
+}
+/* after answering: the same options as This week (categories, Open it, Keep, Bin, Keep forever, Share) for items still waiting; categories and Share for the rest */
+function quizAfter(it){
+  var id=esc(it.id),parked=it.snoozeUntil&&it.snoozeUntil>now(),h='';
+  if(it.status==='open'&&!parked){
+    h+=cardOpen(it,{noBody:it.type==='shot'});
+    if(it.type==='shot'&&it.img)h+='<p class="meta"><a data-imglink="'+esc(it.img)+'" target="_blank" rel="noopener noreferrer">Open the screenshot full size</a></p>';
+    return h;
+  }
+  if(it.status==='binned')h+='<p class="ok" role="status">Binned. You can bring it back from the Archive tab.</p>';
+  else if(parked)h+='<p class="ok" role="status">Kept for later. It comes back on '+esc(new Date(it.snoozeUntil).toLocaleDateString())+'.</p>';
+  h+=quizOriginal(it)+catBlock(it);
+  if(it.status==='forever')h+='<div class="actions"><button class="txt" data-a="unforever" data-id="'+id+'">Take off the shelf</button></div>';
+  return h;
 }
 function viewQuiz(){
   if(ui.quiz&&ui.quiz.done)return quizDone();
