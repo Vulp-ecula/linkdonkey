@@ -134,7 +134,7 @@ details[open] summary.sum{margin-bottom:.2rem}
 (function(){
 'use strict';
 var DAY=864e5, STALE_DAYS=30, SLOTS=3, KEEP_DAYS=7, STEPS=[3,10,30,90];
-var BUILD='2026-10-01 k';
+var BUILD='2026-10-01 l';
 var LS_KEY='linkdonkey.v1';
 /* Supabase project values. The anon/publishable key is public by design; row-level security protects the data. */
 var SB_URL='https://vkreqwhpnxcduqoiifmx.supabase.co', SB_KEY='sb_publishable_q6CciDmqm967BHjGLu9aSA_2XBApgGd';
@@ -575,7 +575,7 @@ function shuffled(a){var r=a.slice();for(var i=r.length-1;i>0;i--){var k=Math.fl
 function quizOriginal(it){
   var h='<div class="orig"><p class="meta">The original:</p><h3>'+esc(it.title)+'</h3>';
   if(it.type==='note')h+='<p class="notetext">'+esc(it.text)+'</p><div class="actions">'+shareBtn(it)+'</div>';
-  else if(it.type==='shot'&&it.img)h+=itemBody(it)+'<p class="meta"><a data-imglink="'+esc(it.img)+'" target="_blank" rel="noopener noreferrer">Open the screenshot full size</a></p><div class="actions">'+shareBtn(it)+'</div>';
+  else if(it.type==='shot'&&it.img)h+='<p class="meta"><a data-imglink="'+esc(it.img)+'" target="_blank" rel="noopener noreferrer">Open the screenshot full size</a></p><div class="actions">'+shareBtn(it)+'</div>';
   else h+='<div class="actions"><a class="btn primary" href="'+esc(it.url)+'" target="_blank" rel="noopener noreferrer">Open the page</a>'+shareBtn(it)+'</div>';
   return h+'</div>';
 }
@@ -602,7 +602,10 @@ function quizQuestion(){
   if(z.i>=z.ids.length){z.done=true;return quizDone();}
   var it=find(z.ids[z.i]),q=it.qz;
   if(!z.order)z.order=shuffled([0,1,2,3]);
-  var answered=z.picked!=null,h='<h2 class="sec" style="margin-top:.2rem">Question '+(z.i+1)+' of '+z.ids.length+'</h2><p class="meta">'+esc(kindLabel(it))+', saved '+ago(it.created)+'. Score so far: '+z.score+'.</p><h3>'+esc(q.q)+'</h3>';
+  var answered=z.picked!=null,h='<h2 class="sec" style="margin-top:.2rem">Question '+(z.i+1)+' of '+z.ids.length+'</h2><p class="meta">'+esc(kindLabel(it))+', saved '+ago(it.created)+'. Score so far: '+z.score+'.</p>';
+  if(it.type==='shot')h+=itemBody(it);
+  else if(it.type!=='note'||(it.title&&it.title!==firstLine(it.text)))h+='<p class="meta">About: <strong>'+esc(it.title)+'</strong></p>';
+  h+='<h3>'+esc(q.q)+'</h3>';
   h+=z.order.map(function(idx,k){
     var cls='qopt',mark='';
     if(answered){if(idx===q.a){cls+=' good';mark='\u2713 ';}else if(k===z.picked){cls+=' bad';mark='\u2717 ';}}
@@ -613,7 +616,7 @@ function quizQuestion(){
     h+='<p class="'+(right?'ok':'err')+'" role="status">'+(right?'Right.':'Not quite. The answer is: '+esc(q.o[q.a])+'.')+'</p>'+(q.e?'<p>'+esc(q.e)+'</p>':'')+quizOriginal(it)+
       '<div class="actions"><button class="btn primary" data-a="quiz-next">'+(z.i+1>=z.ids.length?'See my score':'Next question')+'</button></div>';
   }
-  return h+'<div class="actions"><button class="txt" data-a="quiz-quit">Stop the quiz</button></div>';
+  return h+'<div class="actions">'+(answered?'':'<button class="txt" data-a="quiz-bad">This question does not make sense</button>')+'<button class="txt" data-a="quiz-quit">Stop the quiz</button></div>';
 }
 function quizDone(){
   var z=ui.quiz,h='<h2 class="sec" style="margin-top:.2rem">Your score</h2><p><strong>'+z.score+' of '+z.results.length+'</strong> right.</p>';
@@ -1366,6 +1369,14 @@ document.addEventListener('click',function(e){
     case 'quiz-next':
       if(ui.quiz){ui.quiz.i++;ui.quiz.picked=null;ui.quiz.order=null;if(ui.quiz.i>=ui.quiz.ids.length){ui.quiz.done=true;commit();}else render();}
       break;
+    case 'quiz-bad':{
+      var zb=ui.quiz;if(!zb||zb.picked!=null)break;
+      var bit=find(zb.ids[zb.i]);
+      if(bit){bit.qbad=(bit.qbad||0)+1;bit.qz=null;if(bit.qbad>=2)bit.qzNo=true;saveLocal();}
+      zb.ids.splice(zb.i,1);zb.order=null;
+      if(zb.i>=zb.ids.length){if(zb.results.length){zb.done=true;commit();}else{ui.quiz=null;ui.sortMsg='Skipped. That question will not come up again. Tap Make questions to get a fresh one.';commit();}}
+      else render();
+      break;}
     case 'quiz-quit':
       if(ui.quiz&&ui.quiz.results.length)commit();
       ui.quiz=null;render();break;
