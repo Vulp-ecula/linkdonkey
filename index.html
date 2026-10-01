@@ -167,13 +167,13 @@ async function initRemote(){
 function startSync(id){
   /* local cache belongs to one account: drop it if a different account signs in */
   var prev=null;try{prev=localStorage.getItem(UID_KEY);localStorage.setItem(UID_KEY,id);}catch(e){}
-  if(prev&&prev!==id){state={v:1,rev:0,items:[]};saveLocal();}
+  if(prev&&prev!==id){state={v:1,rev:0,items:[]};saveLocal();stage={v:1,folders:[],items:[],binned:[],dupes:0,kept:0};saveStageLocal();}
   sbUser=id;ui.auth='in';ui.authErr='';
   remote={set:async function(doc){
     var r=await sb.from('ld_state').upsert({user_id:sbUser,doc:doc,rev:doc.rev||0,updated_at:new Date().toISOString()});
     if(r.error)throw r.error;
   }};
-  render();pull();
+  render();pullAll();
 }
 async function pull(){
   if(!remote)return;
@@ -182,13 +182,13 @@ async function pull(){
   var d=r.data&&r.data.doc;
   if(d&&Array.isArray(d.items)){
     var rr=d.rev||0;
-    if(rr>state.rev){state=clone(d);saveLocal();checkSize();render();}
+    if(rr>state.rev){state=clone(d);saveLocal();checkSize();if(reconcileStage())saveStageLocal();render();}
     else if(rr<state.rev){pushRemote();return;}
   }else if(state.items.length){pushRemote();return;}
   ui.sync='synced';paintStatus();
 }
-document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')pull();});
-window.addEventListener('online',pull);
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')pullAll();else if(stageTimer)doPushStage();});
+window.addEventListener('online',pullAll);
 function authView(){
   var sent=ui.auth==='sent';
   return '<header><div class="top"><div class="lockup"><h1 class="brand">LinkDonkey</h1></div></div></header><main>'+
@@ -543,7 +543,47 @@ var STEPS_HTML='<ol class="steps"><li>In Chrome, press Ctrl+Shift+O (Cmd+Option+
 function loadStage(){
   try{var r=localStorage.getItem(SK);if(r){var x=JSON.parse(r);if(x&&Array.isArray(x.items)){stage=x;stage.folders=stage.folders||[];stage.binned=stage.binned||[];stage.kept=stage.kept||0;stage.dupes=stage.dupes||0;}}}catch(e){}
 }
-function saveStage(){try{localStorage.setItem(SK,JSON.stringify(stage));}catch(e){ui.imp='This device could not store the list. Try a smaller file.';}}
+function saveStageLocal(){try{localStorage.setItem(SK,JSON.stringify(stage));}catch(e){ui.imp='This device could not store the list. Try a smaller file.';}}
+function saveStage(){stage.rev=now();saveStageLocal();pushStage();}
+/* ---------- the sorting list syncs through its own table (ld_stage), last write wins ---------- */
+var stageTimer=null,stageOff=false;
+function pushStage(){if(!sb||!sbUser||stageOff)return;clearTimeout(stageTimer);stageTimer=setTimeout(doPushStage,800);}
+async function doPushStage(){
+  if(!sb||!sbUser||stageOff)return;
+  clearTimeout(stageTimer);stageTimer=null;
+  try{
+    var r=await sb.from('ld_stage').upsert({user_id:sbUser,doc:stage,rev:stage.rev||0,updated_at:new Date().toISOString()});
+    if(r.error)throw r.error;
+    if(ui.stageErr){ui.stageErr=false;if(ui.tab==='import')render();}
+  }catch(e){
+    if(e&&(e.code==='42P01'||e.code==='PGRST205'||/does not exist|schema cache/i.test(e.message||''))){stageOff=true;return;}
+    ui.stageErr=true;if(ui.tab==='import')render();
+  }
+}
+function reconcileStage(){
+  var have={};state.items.forEach(function(i){if(i.url)have[norm(i.url)]=1;});
+  var n=stage.items.length;
+  stage.items=stage.items.filter(function(i){return !have[norm(i.u)];});
+  return n!==stage.items.length;
+}
+async function pullStage(){
+  if(!sb||!sbUser||stageOff)return;
+  var r;try{r=await sb.from('ld_stage').select('doc').eq('user_id',sbUser).maybeSingle();}catch(e){return;}
+  if(r.error){if(r.error.code==='42P01'||r.error.code==='PGRST205'||/does not exist|schema cache/i.test(r.error.message||''))stageOff=true;return;}
+  var d=r.data&&r.data.doc;
+  if(d&&Array.isArray(d.items)){
+    var rr=d.rev||0;
+    if(rr>(stage.rev||0)){
+      stage={v:1,folders:d.folders||[],items:d.items,binned:d.binned||[],dupes:d.dupes||0,kept:d.kept||0,rev:rr};
+      reconcileStage();saveStageLocal();
+      ui.sf=null;render();
+    }else if(rr<(stage.rev||0)){pushStage();}
+  }else if(stage.items.length||stage.binned.length){
+    if(!stage.rev){stage.rev=now();saveStageLocal();}
+    pushStage();
+  }
+}
+function pullAll(){pull();pullStage();}
 function sortStage(){stage.items.sort(function(a,b){return (a.d||9e9)-(b.d||9e9);});}
 function norm(u){
   try{
@@ -713,7 +753,8 @@ function recentBlock(){
     return '<div class="row"><h3>'+esc(i.t)+'</h3><p class="meta">'+esc(i.h)+'</p><div class="actions" style="margin-top:.3rem"><button class="txt" data-a="imp-restore" data-id="'+esc(i.id)+'">Restore</button></div></div>';
   }).join('')+'<div class="actions"><button class="txt" data-a="imp-restoreall">Restore all '+stage.binned.length+' binned</button></div>';
 }
-function viewImport(){
+function viewImport(){return (ui.stageErr?'<p class="err" role="alert">The sorting list could not be saved online. It is safe on this device and will try again.</p>':'')+viewImportInner();}
+function viewImportInner(){
   var n=stage.items.length,h='<h2 class="sec" style="margin-top:.2rem">Import from Chrome</h2>';
   if(ui.imp)h+='<p class="ok" role="status">'+esc(ui.imp)+'</p>';
   if(!n){
@@ -722,7 +763,7 @@ function viewImport(){
       '<p class="meta">Nothing changes in Chrome or YouTube. The app only sorts a copy.</p>'+recentBlock()+exportBlock();
   }
   var list=sweepList(),gs=groups();
-  h+='<p class="tally">'+n+' waiting to be sorted. Nothing changes in Chrome. Links you keep sync to your other devices. This list stays on this device.</p>';
+  h+='<p class="tally">'+n+' waiting to be sorted. Nothing changes in Chrome. '+(sb&&sbUser&&!stageOff?'This list syncs to your other devices, so you can sweep on your phone too.':'Links you keep sync to your other devices. This list stays on this device.')+'</p>';
   h+='<h2 class="sec">Quick cuts</h2>'+(gs.length?gs.map(function(x){
     return '<div class="row"><h3>'+esc(x.label)+'</h3><p class="meta">'+x.n+' links</p><div class="actions" style="margin-top:.4rem">'+
       '<button class="btn" data-a="imp-sweep" data-g="'+esc(x.key)+'">Sweep these</button>'+binAllBtn(x.key,'Bin all '+x.n)+'</div></div>';
@@ -938,7 +979,7 @@ document.addEventListener('click',function(e){
     case 'auth-back':ui.auth='out';ui.authErr='';render();break;
     case 'auth-out':
       if(!confirm('Sign out? Your links stay in your account.'))break;
-      sb.auth.signOut().finally(function(){remote=null;sbUser=null;state={v:1,rev:0,items:[]};saveLocal();try{localStorage.removeItem(UID_KEY);localStorage.removeItem(LOTD_KEY);}catch(x){}ui.auth='out';render();});break;
+      sb.auth.signOut().finally(function(){remote=null;sbUser=null;state={v:1,rev:0,items:[]};saveLocal();stage={v:1,folders:[],items:[],binned:[],dupes:0,kept:0};saveStageLocal();try{localStorage.removeItem(UID_KEY);localStorage.removeItem(LOTD_KEY);}catch(x){}ui.auth='out';render();});break;
     case 'tab':ui.tab=el.dataset.tab;ui.panel=null;ui.ok='';render();break;
     case 'type':ui.saveType=el.dataset.t;render();break;
     case 'filter':ui.filter=el.dataset.f;render();break;
