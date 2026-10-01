@@ -121,7 +121,7 @@ details[open] summary.sum{margin-bottom:.2rem}
 (function(){
 'use strict';
 var DAY=864e5, STALE_DAYS=30, SLOTS=3, KEEP_DAYS=7, STEPS=[3,10,30,90];
-var BUILD='2026-10-01 c';
+var BUILD='2026-10-01 e';
 var LS_KEY='linkdonkey.v1';
 /* Supabase project values. The anon/publishable key is public by design; row-level security protects the data. */
 var SB_URL='https://vkreqwhpnxcduqoiifmx.supabase.co', SB_KEY='sb_publishable_q6CciDmqm967BHjGLu9aSA_2XBApgGd';
@@ -228,10 +228,32 @@ function commit(){state.rev=now();checkSize();saveLocal();pushRemote();render();
 function openItems(){return state.items.filter(function(i){return i.status==='open';});}
 function isStale(i){return now()-(i.touched||i.created)>STALE_DAYS*DAY;}
 function eligible(){var t=now();return openItems().filter(function(i){return !i.snoozeUntil||i.snoozeUntil<=t;});}
+function hashId(x){var h=2166136261;x=String(x);for(var i=0;i<x.length;i++){h^=x.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+/* The three slots: anything mid-finish or pushed forward first, then a mix: the oldest, the newest, and one from the middle.
+   The middle pick is chosen by a fixed hash of the id, so it does not change every time the screen is drawn. */
 function carried(){
-  return eligible().sort(function(a,b){
-    return (b.acting?1:0)-(a.acting?1:0)||(b.front||0)-(a.front||0)||(isStale(b)?1:0)-(isStale(a)?1:0)||a.created-b.created;
-  }).slice(0,SLOTS);
+  var pool=eligible(),out=[];
+  function take(it){out.push(it);pool=pool.filter(function(x){return x!==it;});}
+  pool.filter(function(i){return i.acting;}).forEach(function(i){if(out.length<SLOTS)take(i);});
+  pool.filter(function(i){return i.front;}).sort(function(a,b){return (b.front||0)-(a.front||0);}).forEach(function(i){if(out.length<SLOTS)take(i);});
+  var free=SLOTS-out.length,kinds=free>=3?['oldest','newest','middle']:free===2?['oldest','newest']:free===1?['oldest']:[];
+  kinds.forEach(function(k){
+    if(!pool.length)return;
+    var pick;
+    if(k==='oldest')pick=pool.slice().sort(function(a,b){return (isStale(b)?1:0)-(isStale(a)?1:0)||a.created-b.created;})[0];
+    else if(k==='newest')pick=pool.slice().sort(function(a,b){return b.created-a.created;})[0];
+    else{
+      var sorted=pool.slice().sort(function(a,b){return a.created-b.created;}),lo=Math.floor(sorted.length*0.25),hi=Math.max(lo+1,Math.ceil(sorted.length*0.75));
+      var n=sorted.length,keepId=null;
+      try{keepId=localStorage.getItem('linkdonkey.mid');}catch(e){}
+      var wlo=Math.floor(n*0.15),whi=Math.max(wlo+1,Math.ceil(n*0.85));
+      var kept=keepId?sorted.slice(wlo,whi).filter(function(x){return x.id===keepId;})[0]:null;   // keep the same middle card while it is still roughly in the middle
+      pick=kept||sorted.slice(lo,hi).sort(function(a,b){return hashId(a.id)-hashId(b.id);})[0];
+      try{localStorage.setItem('linkdonkey.mid',pick.id);}catch(e){}
+    }
+    take(pick);
+  });
+  return out;
 }
 function recallDue(){
   var t=now();
@@ -302,7 +324,11 @@ function shrink(f){
   });
 }
 function setPics(a){ui.pics=a;ui.shotUrl=a.length===1?URL.createObjectURL(a[0]):'';render();}
-function savedMsg(st){if(st==='forever')return 'Saved to Keep forever.';var n=eligible().length;return n<=SLOTS?'Saved. It is in This week.':'Saved. It is waiting behind '+(n-SLOTS)+(n-SLOTS===1?' other.':' others.');}
+function savedMsg(st){
+  if(st==='forever')return 'Saved to Keep forever.';
+  var last=openItems().sort(function(a,b){return b.created-a.created;})[0];
+  return last&&carried().indexOf(last)>-1?'Saved. It is in This week.':'Saved. It is in your Waiting list.';
+}
 document.addEventListener('change',function(e){
   if(e.target.id!=='f-shot')return;
   ui.formErr='';
@@ -449,7 +475,7 @@ function viewSave(){
     '<div class="chips" style="margin:.6rem 0 .2rem"><button type="button" data-a="ftoggle" aria-pressed="'+(!!ui.saveForever)+'">Keep forever</button></div><p class="meta">'+(ui.saveForever?'Goes straight to your Keep forever shelf, not the weekly queue.':'Optional. Skips the weekly queue and is never binned.')+'</p>'+
     (ui.formErr?'<p class="err" role="alert">'+esc(ui.formErr)+'</p>':'')+
     '<div class="actions"><button class="btn primary" type="submit"'+(ui.saving?' disabled':'')+'>'+(ui.saving?(ui.prog||'Uploading...'):(np>1?'Save '+np+' screenshots':'Save it'))+'</button></div></form>'+
-    (ui.ok?'<p class="ok" role="status">'+esc(ui.ok)+'</p>':'')+(lnk?saveTool():'');
+    (ui.ok?'<p class="ok" role="status">'+esc(ui.ok)+'</p>':'')+(lnk&&!isTouch()?saveTool():'');
 }
 function viewCookbook(){
   var ks=state.items.filter(function(i){return i.status==='keeper';}).sort(function(a,b){return (b.cookedAt||0)-(a.cookedAt||0);});
@@ -531,11 +557,69 @@ function viewForever(){
     '<div class="chips">'+chip('all','All')+chip('links','Links')+chip('recipes','Recipes')+chip('notes','Notes')+chip('shots','Screenshots')+'</div>'+
     '<div id="forever-list">'+foreverRows()+'</div>';
 }
+function isTouch(){try{return (window.matchMedia&&window.matchMedia('(pointer: coarse)').matches)||/Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'');}catch(e){return false;}}
+function cleanFolder(n){return String(n||'').replace(/^\(\d+\)\s*/,'').trim();}
+/* YouTube puts its notification count in the playlist name, e.g. "(104) Watch later". Drop it, and merge folders that become identical. */
+function normFolders(){
+  var names=[],map={},old=stage.folders||[];
+  old.forEach(function(n,i){var c=cleanFolder(n),k=names.indexOf(c);if(k<0){names.push(c);k=names.length-1;}map[i]=k;});
+  var changed=names.length!==old.length||names.some(function(n,i){return n!==old[i];});
+  if(!changed)return false;
+  [stage.items,stage.binned].forEach(function(a){(a||[]).forEach(function(it){if(map.hasOwnProperty(it.f))it.f=map[it.f];});});
+  stage.folders=names;return true;
+}
+/* ---------- backup and restore ---------- */
+var BK_KEY='linkdonkey.lastbackup';
+function backupBlock(){
+  var last='';try{last=localStorage.getItem(BK_KEY)||'';}catch(e){}
+  return '<h2 class="sec">Backup</h2><p class="meta">Saves everything you have kept, finished, binned or put on the shelf, plus your sorting list, to a file on this device. Screenshot pictures stay in your account; the file lists them.'+(last?' Last backup: '+esc(last)+'.':' No backup yet.')+'</p>'+
+    '<div class="actions"><button class="btn primary" data-a="backup">Download a backup</button></div>'+
+    '<label for="f-restore">Restore from a backup file<span class="hint">Adds anything that is missing. Nothing already here is changed or removed.</span></label><input type="file" id="f-restore" accept=".json,application/json">'+
+    (ui.backupMsg?'<p class="ok" role="status">'+esc(ui.backupMsg)+'</p>':'');
+}
+function backupData(){
+  return JSON.stringify({app:'linkdonkey',v:1,saved:new Date().toISOString(),items:state.items,
+    stage:{folders:stage.folders,items:stage.items,binned:stage.binned,dupes:stage.dupes,kept:stage.kept},
+    screenshots:state.items.filter(function(i){return i.img;}).map(function(i){return i.img;})},null,1);
+}
+function restoreBackup(text){
+  var d;try{d=JSON.parse(text);}catch(e){return 'That file could not be read. Nothing was changed.';}
+  if(!d||d.app!=='linkdonkey'||!Array.isArray(d.items))return 'That does not look like a LinkDonkey backup. Nothing was changed.';
+  var OK={open:1,done:1,binned:1,keeper:1,forever:1},have={},add=0,skip=0,sa=0;
+  state.items.forEach(function(i){have[i.id]=1;});
+  d.items.forEach(function(i){
+    var good=i&&typeof i==='object'&&i.id&&OK[i.status]&&(!i.url||/^https?:\/\//i.test(i.url));
+    if(!good||have[i.id]){skip++;return;}
+    state.items.push(i);have[i.id]=1;add++;
+  });
+  if(d.stage&&Array.isArray(d.stage.items)){
+    var urls={},ids={};
+    state.items.forEach(function(i){if(i.url)urls[norm(i.url)]=1;});
+    stage.items.concat(stage.binned).forEach(function(i){ids[i.id]=1;});
+    d.stage.items.forEach(function(i){
+      if(!i||!i.id||ids[i.id]||!/^https?:\/\//i.test(i.u||'')||urls[norm(i.u)])return;
+      var nm=cleanFolder((d.stage.folders||[])[i.f]),fi=stage.folders.indexOf(nm);
+      if(fi<0){stage.folders.push(nm);fi=stage.folders.length-1;}
+      i.f=fi;stage.items.push(i);ids[i.id]=1;sa++;
+    });
+    if(sa){normFolders();sortStage();saveStage();}
+  }
+  if(add)commit();
+  return 'Restored '+add+' item'+(add===1?'':'s')+(sa?' and '+sa+' sorting-list link'+(sa===1?'':'s'):'')+'. '+skip+' skipped (already here, or not readable).';
+}
+document.addEventListener('change',function(e){
+  if(e.target.id!=='f-restore')return;
+  var f=e.target.files&&e.target.files[0];if(!f)return;
+  var r=new FileReader();
+  r.onload=function(){ui.backupMsg=restoreBackup(String(r.result||''));render();};
+  r.onerror=function(){ui.backupMsg='That file could not be read. Nothing was changed.';render();};
+  r.readAsText(f);
+});
 function viewArchive(){
   function chip(f,l){return '<button data-a="filter" data-f="'+f+'" aria-pressed="'+(ui.filter===f)+'">'+l+'</button>';}
   return '<h2 class="sec" style="margin-top:.2rem">Archive</h2>'+
     '<label for="f-q" style="margin-top:0">Search</label><input type="search" id="f-q" data-d="q" value="'+esc(ui.q)+'" autocomplete="off">'+
-    '<div class="chips">'+chip('all','All')+chip('notes','With notes')+chip('binned','Binned')+'</div><div id="archive-list">'+archiveRows()+'</div>';
+    '<div class="chips">'+chip('all','All')+chip('notes','With notes')+chip('binned','Binned')+'</div><div id="archive-list">'+archiveRows()+'</div>'+backupBlock();
 }
 function render(){
   if(ui.auth==='out'||ui.auth==='sent'){$('#app').innerHTML=authView();var af=$('[data-autofocus]');if(af)af.focus();return;}
@@ -551,7 +635,7 @@ var SK='linkdonkey.stage.v1',CAP=2000;
 var stage={v:1,folders:[],items:[],binned:[],dupes:0,kept:0};
 var STEPS_HTML='<ol class="steps"><li>In Chrome, press Ctrl+Shift+O (Cmd+Option+B on a Mac) to open the bookmark manager.</li><li>Click the three dots at the top right of that page, then Export bookmarks.</li><li>Save the file, then choose it below.</li></ol>';
 function loadStage(){
-  try{var r=localStorage.getItem(SK);if(r){var x=JSON.parse(r);if(x&&Array.isArray(x.items)){stage=x;stage.folders=stage.folders||[];stage.binned=stage.binned||[];stage.kept=stage.kept||0;stage.dupes=stage.dupes||0;}}}catch(e){}
+  try{var r=localStorage.getItem(SK);if(r){var x=JSON.parse(r);if(x&&Array.isArray(x.items)){stage=x;stage.folders=stage.folders||[];stage.binned=stage.binned||[];stage.kept=stage.kept||0;stage.dupes=stage.dupes||0;if(normFolders())saveStageLocal();}}}catch(e){}
 }
 function saveStageLocal(){try{localStorage.setItem(SK,JSON.stringify(stage));}catch(e){ui.imp='This device could not store the list. Try a smaller file.';}}
 function saveStage(){stage.rev=now();saveStageLocal();pushStage();}
@@ -584,7 +668,7 @@ async function pullStage(){
   if(d&&Array.isArray(d.items)){
     var rr=d.rev||0;
     if(rr>(stage.rev||0)){
-      stage={v:1,folders:d.folders||[],items:d.items,binned:d.binned||[],dupes:d.dupes||0,kept:d.kept||0,rev:rr};
+      stage={v:1,folders:d.folders||[],items:d.items,binned:d.binned||[],dupes:d.dupes||0,kept:d.kept||0,rev:rr};normFolders();
       reconcileStage();saveStageLocal();
       ui.sf=null;render();
     }else if(rr<(stage.rev||0)){pushStage();}
@@ -630,7 +714,7 @@ function addRows(rows){
     if(seen[k]){dupes++;return;}
     if(added>=CAP){over++;return;}
     seen[k]=1;
-    var pn=r.p||'',fi=stage.folders.indexOf(pn);
+    var pn=cleanFolder(r.p||''),fi=stage.folders.indexOf(pn);
     if(fi<0){stage.folders.push(pn);fi=stage.folders.length-1;}
     stage.items.push({id:uid(),u:r.u,t:r.t||niceTitle(r.u),f:fi,d:r.d||0,h:r.h||host(r.u)});
     added++;
@@ -915,6 +999,7 @@ function saveTool(){
     '<div class="actions"><button class="btn" data-a="paste-clip">Paste from clipboard</button></div>';
 }
 function sourcesBlock(){
+  if(isTouch())return '<p class="meta">Importing from Chrome and YouTube is done on a computer. The list you build there shows up here so you can sweep it.</p>';
   var chrome='<details'+(stage.items.length?'':' open')+'><summary class="sum">From Chrome bookmarks</summary>'+
     '<p>Chrome cannot hand this page your bookmarks directly, so export them to a file first. Do this on a laptop.</p>'+STEPS_HTML+fileBlock('Bookmarks file')+'</details>';
   var yt='<details><summary class="sum">From YouTube: Watch later and saved playlists</summary>'+
@@ -995,6 +1080,13 @@ document.addEventListener('click',function(e){
     case 'tab':ui.tab=el.dataset.tab;ui.panel=null;ui.ok='';render();break;
     case 'type':ui.saveType=el.dataset.t;render();break;
     case 'filter':ui.filter=el.dataset.f;render();break;
+    case 'backup':{
+      var bd=new Date(),ds=bd.getFullYear()+'-'+String(bd.getMonth()+1).padStart(2,'0')+'-'+String(bd.getDate()).padStart(2,'0');
+      dl.save({filename:'linkdonkey-backup-'+ds+'.json',data:backupData(),type:'application/json'}).then(function(){
+        try{localStorage.setItem(BK_KEY,ds);}catch(x){}
+        ui.backupMsg='Backup downloaded. Keep the file somewhere safe, away from this device if you can.';render();
+      });
+      break;}
     case 'wfilter':ui.wf=el.dataset.f;render();break;
     case 'ffilter':ui.ff=el.dataset.f;render();break;
     case 'ftoggle':ui.saveForever=!ui.saveForever;render();break;
@@ -1102,7 +1194,7 @@ loadStage();
 prefillFromUrl();
 render();
 initRemote();
-dl={save:function(o){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([o.data],{type:'text/html'}));a.download=o.filename;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1000);return Promise.resolve();}};
+dl={save:function(o){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([o.data],{type:o.type||'text/html'}));a.download=o.filename;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1000);return Promise.resolve();}};
 if('serviceWorker' in navigator&&location.protocol==='https:'){navigator.serviceWorker.register('sw.js').catch(function(){});}
 })();
 </script>
